@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RumorMX</title>
+    <link rel="stylesheet" href="style.css" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="img/favicon.png" />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- Indicaciones flotantes -->
+    <div class="floating-hint">
+      <div class="hint-title">RumorMX</div>
+      <div class="hint-text">
+        Haz clic en el mapa para agregar una nueva nota en esa ubicación.
+      </div>
+    </div>
+
+    <!-- Tu lógica del mapa -->
+    <script src="app.js"></script>
+
+    <!-- Google Maps API optimizada -->
+    <script
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBem75x7a8MEUCbgWTLcHuT5jvxaTfHoCc&libraries=marker&callback=initMap&loading=async"
+      async
+      defer
+    ></script>
+  </body>
+</html>

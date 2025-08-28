@@ -1,0 +1,19 @@
+{
+  "name": "mexico-housing-map",
+  "version": "1.0.0",
+  "description": "Aplicación web para agregar descripciones a viviendas en México",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "mysql2": "^3.14.3",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
