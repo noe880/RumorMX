@@ -235,6 +235,7 @@ body {
   }
   .floating-hint .hint-text {
     font-size: 12px;
+    display: none;
   }
 }
 
