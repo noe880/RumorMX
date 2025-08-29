@@ -34,6 +34,7 @@ async function initMap() {
     fullscreenControl: false,
     streetViewControl: false,
     mapTypeControl: false,
+    gestureHandling: "greedy",
   });
 
   // Limitar el panning fuera de México (seguridad extra)
