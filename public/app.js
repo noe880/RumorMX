@@ -141,9 +141,19 @@ function openDetail(marker) {
   content.className = "infowindow";
   content.innerHTML = `
     <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
-    <div class="desc">${escapeHtml(
-      marker.description || "Sin descripción"
-    )}</div>
+    <div class="desc">${escapeHtml(marker.description || "Sin descripción")}</div>
+
+    <div class="comments-section">
+      <div class="comments-title"><strong>Comentarios</strong></div>
+      <div class="comments-list"></div>
+      <div class="comment-form quick-form" style="padding: 10px;">
+      <br>
+        <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" />
+        <div class="actions">
+          <button class="primary" id="comment-submit">Comentar</button>
+        </div>
+      </div>
+    </div>
   `;
 
   infoWindow.setContent(content);
@@ -155,6 +165,67 @@ function openDetail(marker) {
   });
 
   infoWindow.open({ map });
+
+  // Si no hay ID, no se pueden cargar/enviar comentarios
+  if (!marker.id) return;
+
+  const listEl = content.querySelector(".comments-list");
+  const inputEl = content.querySelector("#comment-input");
+  const submitEl = content.querySelector("#comment-submit");
+
+  const renderComments = (comments) => {
+    if (!Array.isArray(comments) || comments.length === 0) {
+      listEl.innerHTML = '<div class="comment-empty" style="color:#6b7280;font-size:13px;">Sé el primero en comentar</div>';
+      return;
+    }
+    listEl.innerHTML = "";
+    comments.forEach((c) => {
+      const item = document.createElement("div");
+      item.className = "comment-item";
+      const when = c.created_at ? new Date(c.created_at).toLocaleString() : "";
+      item.innerHTML = `
+        <div class="comment-text" style="white-space:pre-wrap;line-height:1.4;font-size:14px;">👤${escapeHtml(c.comment || "")}</div>
+        <div class="comment-meta" style="color:#9ca3af;font-size:12px;margin-top:2px;">${escapeHtml(when)}</div>
+      `;
+      listEl.appendChild(item);
+    });
+  };
+
+  const loadComments = async () => {
+    try {
+      listEl.innerHTML = '<div style="color:#6b7280;font-size:13px;">Cargando comentarios...</div>';
+      const resp = await fetch(`/api/houses/${marker.id}/comments`);
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      renderComments(data);
+    } catch (e) {
+      console.error("Error cargando comentarios:", e);
+      listEl.innerHTML = '<div style="color:#ef4444;font-size:13px;">No se pudieron cargar los comentarios</div>';
+    }
+  };
+
+  submitEl.addEventListener("click", async () => {
+    const txt = (inputEl.value || "").trim();
+    if (!txt) return;
+    try {
+      submitEl.disabled = true;
+      const resp = await fetch(`/api/houses/${marker.id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: txt }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      inputEl.value = "";
+      await loadComments();
+    } catch (e) {
+      console.error("Error enviando comentario:", e);
+      alert("No se pudo enviar el comentario");
+    } finally {
+      submitEl.disabled = false;
+    }
+  });
+
+  loadComments();
 }
 
 function openCreateForm(position) {

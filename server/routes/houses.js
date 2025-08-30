@@ -94,4 +94,47 @@ router.delete("/:id", (req, res) => {
   });
 });
 
+// Obtener comentarios de una vivienda
+router.get("/:id/comments", (req, res) => {
+  const id = parseInt(req.params.id);
+  const q =
+    "SELECT id, house_id, comment, created_at FROM comments WHERE house_id = ? ORDER BY created_at ASC";
+
+  db.query(q, [id], (err, rows) => {
+    if (err) {
+      console.error("Error obteniendo comentarios:", err);
+      return res.status(500).json({ error: "Error interno del servidor" });
+    }
+    res.json(rows);
+  });
+});
+
+// Crear un comentario para una vivienda
+router.post("/:id/comments", (req, res) => {
+  const id = parseInt(req.params.id);
+  const { comment } = req.body;
+
+  if (!comment || !comment.trim()) {
+    return res.status(400).json({ error: "Comentario requerido" });
+  }
+
+  const q = "INSERT INTO comments (house_id, comment) VALUES (?, ?)";
+  db.query(q, [id, comment.trim()], (err, results) => {
+    if (err) {
+      console.error("Error creando comentario:", err);
+      return res.status(500).json({ error: "Error interno del servidor" });
+    }
+
+    const selectQ =
+      "SELECT id, house_id, comment, created_at FROM comments WHERE id = ?";
+    db.query(selectQ, [results.insertId], (err2, rows) => {
+      if (err2) {
+        console.error("Error obteniendo comentario creado:", err2);
+        return res.status(500).json({ error: "Error interno del servidor" });
+      }
+      res.status(201).json(rows[0]);
+    });
+  });
+});
+
 module.exports = router;
