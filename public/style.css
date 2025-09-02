@@ -31,6 +31,116 @@ body {
 }
 
 /* ======================
+   Botón 3 puntos y Panel lateral
+   ====================== */
+.menu-button {
+  position: fixed;
+  top: 17px;
+  left: 12px;
+  z-index: 20;
+  background: rgb(255, 255, 255);
+  color: #000000;
+  border: none;
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgb(255, 255, 255);
+}
+.menu-button:hover {
+  background: rgb(255, 255, 255);
+}
+
+.side-panel {
+  position: fixed;
+  top: 0;
+  right: -320px; /* oculto por defecto */
+  width: 320px;
+  max-width: 86vw;
+  height: 100vh;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(6px);
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.12);
+  border-left: 1px solid #e5e7eb;
+  z-index: 19; /* por debajo del botón */
+  transition: right 0.25s ease-in-out;
+  display: flex;
+  flex-direction: column;
+}
+.side-panel.open {
+  right: 0; /* visible */
+}
+.side-header {
+  padding: 14px 16px;
+  font-weight: 700;
+  border-bottom: 1px solid #e5e7eb;
+}
+.top-list {
+  padding: 8px 8px 16px;
+  overflow-y: auto;
+}
+.top-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  margin: 8px 0;
+  cursor: pointer;
+  background: #ffffff;
+}
+.top-item:hover { background: #f9fafb; }
+.top-rank {
+  font-weight: 800;
+  color: #2563eb;
+  width: 24px;
+  text-align: center;
+}
+.top-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* asegúrate de que el contenedor tenga altura definida */
+}
+
+.top-list {
+  flex-grow: 1; /* empuja el contenido hacia arriba */
+}
+
+.support-note {
+  padding: 10px;
+  font-size: 14px;
+  text-align: center;
+  color: #555;
+  border-top: 1px solid #ddd;
+}
+
+.support-note a {
+  color: #e1306c; /* color oficial de Instagram */
+  font-weight: bold;
+  text-decoration: none;
+}
+
+.support-note a:hover {
+  text-decoration: underline;
+}
+
+.top-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-desc { color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-meta { color: #9ca3af; font-size: 12px; }
+
+/* ======================
    Marcadores (chips)
    ====================== */
 .marker-chip {

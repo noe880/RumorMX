@@ -13,6 +13,7 @@ const MEXICO_BOUNDS = {
 
 window.addEventListener("load", async () => {
   await initMap();
+  setupTopPanel();
 });
 
 async function initMap() {
@@ -54,10 +55,16 @@ async function initMap() {
   infoWindow = new google.maps.InfoWindow();
 
   await loadHouses();
+  // precargar top si se desea al abrir panel (no visible hasta click)
+  preloadTopNotes();
 
   // Actualizar visibilidad con movimiento/zoom
   map.addListener("idle", updateMarkersVisibility);
   map.addListener("zoom_changed", updateMarkersVisibility);
+
+  // cerrar panel si se hace click en el mapa (opcional)
+  const panel = document.getElementById("side-panel");
+  if (panel) panel.classList.remove("open");
 
   // Crear nueva nota con click (solo si estás dentro del radio desde el centro)
   map.addListener("click", (event) => {
@@ -421,6 +428,111 @@ function updateMarkersVisibility() {
     infoWindow.close();
     currentDetailMarker = null;
   }
+}
+
+// -------- Top 5 Lógica --------
+let cachedTop = [];
+let topLoadedOnce = false;
+
+async function fetchTopNotes() {
+  const resp = await fetch('/api/houses/top?limit=5');
+  if (!resp.ok) throw new Error(await resp.text());
+  const data = await resp.json();
+  cachedTop = Array.isArray(data) ? data : [];
+  topLoadedOnce = true;
+  return cachedTop;
+}
+
+function renderTopList(list) {
+  const container = document.getElementById('top-list');
+  if (!container) return;
+  if (!list || list.length === 0) {
+    container.innerHTML = '<div style="padding:12px;color:#6b7280;font-size:13px;">Sin datos</div>';
+    return;
+  }
+  container.innerHTML = '';
+  list.slice(0, 5).forEach((item, idx) => {
+    const el = document.createElement('div');
+    el.className = 'top-item';
+    el.innerHTML = `
+      <div class="top-rank">${idx + 1}</div>
+      <div class="top-content">
+        <div class="top-title">${escapeHtml(item.address || 'Sin título')}</div>
+        <div class="top-desc">${escapeHtml(item.description || '')}</div>
+        <div class="top-meta">💬 ${item.comment_count || 0} comentarios</div>
+      </div>
+    `;
+    el.addEventListener('click', () => {
+      // Buscar el marcador existente por id
+      const marker = markers.find(m => m.id === item.id);
+      if (marker) {
+        const pos = new google.maps.LatLng(marker.lat, marker.lng);
+        map.setCenter(pos);
+        map.setZoom(17);
+        openDetail(marker);
+      } else {
+        // Si por alguna razón no está cargado, crear uno temporal
+        const position = new google.maps.LatLng(item.lat, item.lng);
+        const tempMarker = createMarker(position, item.address, item.description, item.id);
+        markers.push(tempMarker);
+        map.setCenter(position);
+        map.setZoom(17);
+        openDetail(tempMarker);
+      }
+      // Cerrar panel Top 5 al seleccionar
+      const panel = document.getElementById('side-panel');
+      if (panel) panel.classList.remove('open');
+    });
+    container.appendChild(el);
+  });
+}
+
+function setupTopPanel() {
+  const btn = document.getElementById('menu-button');
+  const panel = document.getElementById('side-panel');
+  if (!btn || !panel) return;
+
+  const closePanel = () => panel.classList.remove('open');
+
+  btn.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const opening = !panel.classList.contains('open');
+    if (opening) {
+      panel.classList.add('open');
+      try {
+        if (!topLoadedOnce) await fetchTopNotes();
+        renderTopList(cachedTop);
+      } catch (e) {
+        console.error('Error cargando Top 5:', e);
+        const container = document.getElementById('top-list');
+        if (container) container.innerHTML = '<div style="padding:12px;color:#ef4444;font-size:13px;">No se pudo cargar el Top 5</div>';
+      }
+    } else {
+      closePanel();
+    }
+  });
+
+  // Cerrar al hacer clic fuera del panel
+  document.addEventListener('click', (e) => {
+    if (!panel.classList.contains('open')) return;
+    const clickInsidePanel = panel.contains(e.target);
+    const clickOnButton = btn.contains(e.target);
+    if (!clickInsidePanel && !clickOnButton) {
+      closePanel();
+    }
+  });
+
+  // Cerrar con Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closePanel();
+    }
+  });
+}
+
+function preloadTopNotes() {
+  // Pre-carga silenciosa, pero no abre ni renderiza hasta click
+  fetchTopNotes().catch(() => {});
 }
 
 // Manejo de error de Google Maps API

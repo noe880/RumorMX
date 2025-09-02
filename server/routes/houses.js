@@ -137,4 +137,25 @@ router.post("/:id/comments", (req, res) => {
   });
 });
 
+// Top houses by comment count
+router.get("/top", (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 5;
+  const q = `
+    SELECT h.*, COALESCE(COUNT(c.id), 0) AS comment_count
+    FROM houses h
+    LEFT JOIN comments c ON c.house_id = h.id
+    GROUP BY h.id
+    ORDER BY comment_count DESC, h.created_at DESC
+    LIMIT ?
+  `;
+
+  db.query(q, [limit], (err, rows) => {
+    if (err) {
+      console.error("Error obteniendo top de viviendas:", err);
+      return res.status(500).json({ error: "Error interno del servidor" });
+    }
+    res.json(rows);
+  });
+});
+
 module.exports = router;
