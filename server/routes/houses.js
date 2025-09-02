@@ -462,15 +462,21 @@ router.delete("/:id/reactions", (req, res) => {
   });
 });
 
-// Top houses by house reaction count
+// Top houses by house reaction count (but also include comment count for display)
 router.get("/top", (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 5;
   const q = `
-    SELECT h.*, COALESCE(COUNT(cr.reaction), 0) AS reaction_count
+    SELECT h.*,
+           COALESCE(rc.reaction_count, 0) AS reaction_count,
+           (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count
     FROM houses h
-    LEFT JOIN comment_reactions cr ON cr.house_id = h.id
-    GROUP BY h.id
-    ORDER BY reaction_count DESC, h.created_at DESC
+    LEFT JOIN (
+      SELECT house_id, COUNT(*) AS reaction_count
+      FROM comment_reactions
+      WHERE house_id IS NOT NULL
+      GROUP BY house_id
+    ) rc ON rc.house_id = h.id
+    ORDER BY COALESCE(rc.reaction_count, 0) DESC, h.created_at DESC
     LIMIT ?
   `;
 
