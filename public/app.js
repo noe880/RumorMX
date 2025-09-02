@@ -534,12 +534,12 @@ function updateMarkersVisibility() {
   }
 }
 
-// -------- Top 5 Lógica --------
+// -------- Top 10 Lógica --------
 let cachedTop = [];
 let topLoadedOnce = false;
 
 async function fetchTopNotes() {
-  const resp = await fetch("/api/houses/top?limit=5");
+  const resp = await fetch("/api/houses/top?limit=10");
   if (!resp.ok) throw new Error(await resp.text());
   const data = await resp.json();
   cachedTop = Array.isArray(data) ? data : [];
@@ -556,7 +556,7 @@ function renderTopList(list) {
     return;
   }
   container.innerHTML = "";
-  list.slice(0, 5).forEach((item, idx) => {
+  list.slice(0, 10).forEach((item, idx) => {
     const el = document.createElement("div");
     el.className = "top-item";
     el.innerHTML = `
@@ -589,7 +589,7 @@ function renderTopList(list) {
         map.setZoom(17);
         openDetail(tempMarker);
       }
-      // Cerrar panel Top 5 al seleccionar
+      // Cerrar panel Top 10 al seleccionar
       const panel = document.getElementById("side-panel");
       if (panel) panel.classList.remove("open");
     });
@@ -613,11 +613,11 @@ function setupTopPanel() {
         if (!topLoadedOnce) await fetchTopNotes();
         renderTopList(cachedTop);
       } catch (e) {
-        console.error("Error cargando Top 5:", e);
+        console.error("Error cargando Top 10:", e);
         const container = document.getElementById("top-list");
         if (container)
           container.innerHTML =
-            '<div style="padding:12px;color:#ef4444;font-size:13px;">No se pudo cargar el Top 5</div>';
+            '<div style="padding:12px;color:#ef4444;font-size:13px;">No se pudo cargar el Top 10</div>';
       }
     } else {
       closePanel();

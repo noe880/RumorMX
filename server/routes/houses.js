@@ -462,13 +462,24 @@ router.delete("/:id/reactions", (req, res) => {
   });
 });
 
-// Top houses by house reaction count (but also include comment count for display)
+// Top houses with improved algorithm (time-weighted engagement)
 router.get("/top", (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 5;
+  const limit = parseInt(req.query.limit, 10) || 10;
   const q = `
     SELECT h.*,
            COALESCE(rc.reaction_count, 0) AS reaction_count,
-           (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count
+           (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count,
+           (
+             -- Base score: reactions + comments * 2
+             COALESCE(rc.reaction_count, 0) +
+             (SELECT COUNT(*) FROM comments WHERE house_id = h.id) * 2 +
+             -- Recency bonus: recent activity (last 7 days) * 1.5
+             COALESCE(rc_recent.recent_reactions, 0) * 1.5 +
+             (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) * 3 +
+             -- Super recency bonus: last 24 hours * 2
+             COALESCE(rc_today.recent_reactions, 0) * 2 +
+             (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) * 4
+           ) * EXP(-DATEDIFF(NOW(), h.created_at) * 0.02) AS engagement_score
     FROM houses h
     LEFT JOIN (
       SELECT house_id, COUNT(*) AS reaction_count
@@ -476,7 +487,19 @@ router.get("/top", (req, res) => {
       WHERE house_id IS NOT NULL
       GROUP BY house_id
     ) rc ON rc.house_id = h.id
-    ORDER BY COALESCE(rc.reaction_count, 0) DESC, h.created_at DESC
+    LEFT JOIN (
+      SELECT house_id, COUNT(*) AS recent_reactions
+      FROM comment_reactions
+      WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      GROUP BY house_id
+    ) rc_recent ON rc_recent.house_id = h.id
+    LEFT JOIN (
+      SELECT house_id, COUNT(*) AS recent_reactions
+      FROM comment_reactions
+      WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+      GROUP BY house_id
+    ) rc_today ON rc_today.house_id = h.id
+    ORDER BY engagement_score DESC, h.created_at DESC
     LIMIT ?
   `;
 
