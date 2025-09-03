@@ -499,7 +499,7 @@ router.get("/top", (req, res) => {
       WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
       GROUP BY house_id
     ) rc_today ON rc_today.house_id = h.id
-    ORDER BY engagement_score DESC, h.created_at DESC
+    ORDER BY (engagement_score * (1 + (RAND(UNIX_TIMESTAMP(CURDATE())) * 0.6 - 0.3))) DESC, h.created_at DESC
     LIMIT ?
   `;
 
