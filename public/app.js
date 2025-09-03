@@ -5,10 +5,10 @@ let currentDetailMarker = null;
 
 // Limites aproximados de México (para restringir el viewport)
 const MEXICO_BOUNDS = {
-  north: 28.7,
-  south: 18.5,
-  west: -115.4,
-  east: -88.7,
+  north: 32.7,
+  south: 17.5,
+  west: -118.4,
+  east: -90.7,
 };
 
 window.addEventListener("load", async () => {
