@@ -1,5 +1,6 @@
 let map;
 let markers = [];
+let emojiMarkers = [];
 let popup;
 let currentDetailMarker = null;
 
@@ -50,12 +51,20 @@ async function initMap() {
 
   map.on("load", async () => {
     await loadHouses();
+    await loadEmojis();
     preloadTopNotes();
 
     updateMarkersVisibility();
+    updateEmojiVisibility();
 
-    map.on("moveend", updateMarkersVisibility);
-    map.on("zoomend", updateMarkersVisibility);
+    map.on("moveend", () => {
+      updateMarkersVisibility();
+      updateEmojiVisibility();
+    });
+    map.on("zoomend", () => {
+      updateMarkersVisibility();
+      updateEmojiVisibility();
+    });
 
     const panel = document.getElementById("side-panel");
     if (panel) panel.classList.remove("open");
@@ -114,7 +123,12 @@ async function loadHouses() {
 
     houses.forEach((house) => {
       const position = { lat: house.lat, lng: house.lng };
-      const marker = createMarker(position, house.address, house.description, house.id);
+      const marker = createMarker(
+        position,
+        house.address,
+        house.description,
+        house.id
+      );
       markers.push(marker);
     });
 
@@ -125,17 +139,101 @@ async function loadHouses() {
   }
 }
 
-function openDetail(marker) {
-  // Centrar mapa sobre la nota para que el popup quede bien posicionado
-  try { map && map.easeTo({ center: [marker.lng, marker.lat], duration: 350 }); } catch (_) {}
+async function loadEmojis() {
+  try {
+    const bounds = map.getBounds();
+    const params = new URLSearchParams({
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+    });
 
-  console.log("Opening detail for marker:", marker.id, "description:", marker.description);
+    const response = await fetch(`/api/houses/emojis?${params}`);
+    const emojis = await response.json();
+
+    // Limpiar emojis anteriores
+    emojiMarkers.forEach((marker) => marker.remove());
+    emojiMarkers = [];
+
+    emojis.forEach((emoji) => {
+      const position = {
+        lat: parseFloat(emoji.lat),
+        lng: parseFloat(emoji.lng),
+      };
+      const marker = createEmojiMarker(
+        position,
+        emoji.emoji,
+        emoji.emoji_type,
+        emoji.id
+      );
+      emojiMarkers.push(marker);
+    });
+
+    updateEmojiVisibility();
+  } catch (error) {
+    console.error("Error loading emojis:", error);
+  }
+}
+
+function createEmojiMarker(position, emoji, emojiType, id) {
+  const emojiDiv = document.createElement("div");
+  emojiDiv.className = "emoji-marker";
+  emojiDiv.textContent = emoji;
+  emojiDiv.style.cssText = `
+    font-size: 24px;
+    cursor: pointer;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+    user-select: none;
+  `;
+
+  const marker = new mapboxgl.Marker({
+    element: emojiDiv,
+    anchor: "center",
+  })
+    .setLngLat([position.lng, position.lat])
+    .addTo(map);
+
+  marker.emoji = emoji;
+  marker.emojiType = emojiType;
+  marker.id = id;
+  marker.lat = position.lat;
+  marker.lng = position.lng;
+  marker._visible = true;
+
+  // No mostrar información al hacer click en emoji
+  // emojiDiv.addEventListener("click", (ev) => {
+  //   ev.stopPropagation();
+  //   showEmojiInfo(marker);
+  // });
+
+  return marker;
+}
+
+// Función showEmojiInfo removida - los emojis ya no muestran información al hacer click
+
+function openDetail(marker, shouldCenter = true) {
+  // Centrar mapa sobre la nota para que el popup quede bien posicionado (opcional)
+  if (shouldCenter) {
+    try {
+      map && map.easeTo({ center: [marker.lng, marker.lat], duration: 350 });
+    } catch (_) {}
+  }
+
+  console.log(
+    "Opening detail for marker:",
+    marker.id,
+    "description:",
+    marker.description
+  );
 
   const content = document.createElement("div");
   content.className = "infowindow";
   content.innerHTML = `
     <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
-    <div class="desc">${escapeHtml(marker.description || "Sin descripción")}</div>
+    <div class="desc">${escapeHtml(
+      marker.description || "Sin descripción"
+    )}</div>
 
     <div class="house-reactions-section" style="padding: 0 10px; border: 1px solid #ffffff; border-radius: 8px; background: #ffffffff;">
       <div class="house-reactions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
@@ -146,7 +244,7 @@ function openDetail(marker) {
       <div class="comments-list"></div>
     </div>
     <div class="comment-form quick-form" style="padding: 0 10px;">
-      <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" />
+      <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" autocomplete="off" />
       <div class="actions">
         <button class="primary" id="comment-submit">
           <i class="fa-solid"></i>
@@ -164,7 +262,11 @@ function openDetail(marker) {
     const from = map.project([marker.lng, marker.lat]);
     const to = { x: from.x, y: from.y + pixelOffsetY };
     const toLngLat = map.unproject(to);
-    map.easeTo({ center: [toLngLat.lng, toLngLat.lat], zoom: targetZoom, duration: 350 });
+    map.easeTo({
+      center: [toLngLat.lng, toLngLat.lat],
+      zoom: targetZoom,
+      duration: 350,
+    });
   } catch (_) {}
 
   // Si no hay ID, no se pueden cargar/enviar comentarios ni reacciones
@@ -179,6 +281,8 @@ function openDetail(marker) {
 
   // Prevent auto-focus on mobile to avoid keyboard appearing automatically
   inputEl.blur();
+  inputEl.setAttribute("inputmode", "none");
+  setTimeout(() => inputEl.removeAttribute("inputmode"), 100);
 
   const renderComments = (comments) => {
     if (!Array.isArray(comments) || comments.length === 0) {
@@ -336,15 +440,30 @@ function openCreateForm(position) {
   content.innerHTML = `
     <div class="title">Nueva nota</div>
     <div class="quick-form large" style="padding: 4px;">
-      <input id="addr" type="text" placeholder="Título" maxlength="70" />
-      <textarea id="desc" placeholder="Descripción"></textarea>
+      <input id="addr" type="text" placeholder="Título (opcional)" maxlength="70" autocomplete="off" />
+      <textarea id="desc" placeholder="Descripción (opcional)" autocomplete="off"></textarea>
       <div class="actions">
-        <button class="primary" id="save">Guardar</button>
+        <button class="primary" id="save">Guardar nota</button>
       </div>
+    </div>
+    <div class="emoji-section" style="border-top: 1px solid #e5e7eb; margin-top: 10px; padding-top: 10px;">
+      <div class="emoji-grid">
+        <button class="emoji-btn" data-type="NOV"><span class="emoji-icon">❤️</span><span class="emoji-label">NOV</span></button>
+        <button class="emoji-btn" data-type="AMA"><span class="emoji-icon">💋</span><span class="emoji-label">AMA</span></button>
+        <button class="emoji-btn" data-type="GAY"><span class="emoji-icon">🏳️‍🌈</span><span class="emoji-label">GAY</span></button>
+        <button class="emoji-btn" data-type="EX"><span class="emoji-icon">💔</span><span class="emoji-label">EX</span></button>
+        <button class="emoji-btn" data-type="COM"><span class="emoji-icon">💍</span><span class="emoji-label">COM</span></button>
+        <button class="emoji-btn" data-type="ROL"><span class="emoji-icon">🔥</span><span class="emoji-label">ROL</span></button>
+        <button class="emoji-btn" data-type="FAL"><span class="emoji-icon">🎭</span><span class="emoji-label">FAL</span></button>
+      </div>
+      <div class="emoji-status" style="padding: 8px 0; font-size: 12px; color: #666;"></div>
     </div>
   `;
 
-  popup.setDOMContent(content).setLngLat([position.lng, position.lat]).addTo(map);
+  popup
+    .setDOMContent(content)
+    .setLngLat([position.lng, position.lat])
+    .addTo(map);
 
   // Auto-expand del textarea para evitar scroll
   const descEl = content.querySelector("#desc");
@@ -354,6 +473,70 @@ function openCreateForm(position) {
   };
   descEl.addEventListener("input", () => autoResize(descEl));
   setTimeout(() => autoResize(descEl), 0);
+
+  // Prevenir foco automático en móviles
+  const addrEl = content.querySelector("#addr");
+  if (addrEl) addrEl.blur();
+  if (descEl) descEl.blur();
+
+  // Cargar estado de emojis
+  updateEmojiStatus(content);
+
+  // Event listeners para botones de emoji
+  content.querySelectorAll(".emoji-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const emojiType = btn.getAttribute("data-type");
+      try {
+        btn.disabled = true;
+        const resp = await fetch("/api/houses/emojis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lat: position.lat,
+            lng: position.lng,
+            emoji_type: emojiType,
+          }),
+        });
+
+        if (!resp.ok) {
+          const error = await resp.text();
+          throw new Error(error);
+        }
+
+        const newEmoji = await resp.json();
+
+        // Crear marcador para el nuevo emoji
+        const marker = createEmojiMarker(
+          position,
+          newEmoji.emoji,
+          newEmoji.emoji_type,
+          newEmoji.id
+        );
+        emojiMarkers.push(marker);
+
+        // Actualizar estado
+        updateEmojiStatus(content);
+
+        // Feedback visual
+        btn.style.background = "#e0f2fe";
+        setTimeout(() => {
+          btn.style.background = "";
+        }, 500);
+
+        // Cerrar el modal inmediatamente después de colocar emoji
+        setTimeout(() => {
+          try {
+            popup.remove();
+          } catch (_) {}
+        }, 300);
+      } catch (error) {
+        console.error("Error placing emoji:", error);
+        alert(error.message || "Error al colocar emoji");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 
   content.querySelector("#save").addEventListener("click", async () => {
     const address = content.querySelector("#addr").value.trim();
@@ -379,14 +562,49 @@ function openCreateForm(position) {
 
       const marker = createMarker(position, address, description, newHouse.id);
       markers.push(marker);
-      // Centrar al nuevo marcador y actualizar visibilidad
-      map.setCenter([position.lng, position.lat]);
+      // NO centrar automáticamente al crear nueva nota, solo actualizar visibilidad
       updateMarkersVisibility();
-      openDetail(marker);
+      // Abrir detalle sin centrar el mapa
+      openDetail(marker, false);
     } catch (e) {
       console.error("Error saving house:", e);
     }
   });
+}
+
+// Función openEmojiForm removida - los emojis se colocan desde el formulario de nueva nota
+
+async function updateEmojiStatus(content) {
+  try {
+    const resp = await fetch("/api/houses/emojis/daily-count");
+    const data = await resp.json();
+
+    const statusEl = content.querySelector(".emoji-status");
+    if (statusEl) {
+      statusEl.textContent = `Has colocado ${data.count} de ${data.limit} emojis hoy (${data.remaining} restantes)`;
+      statusEl.style.color = data.remaining === 0 ? "#ef4444" : "#6b7280";
+
+      // Deshabilitar botones si se alcanzó el límite
+      if (data.remaining === 0) {
+        content.querySelectorAll(".emoji-btn").forEach((btn) => {
+          btn.disabled = true;
+          btn.style.opacity = "0.5";
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error loading emoji status:", error);
+    // Si hay error, mostrar mensaje alternativo
+    const statusEl = content.querySelector(".emoji-status");
+    if (statusEl) {
+      statusEl.textContent = "Función de emojis no disponible temporalmente";
+      statusEl.style.color = "#ef4444";
+      content.querySelectorAll(".emoji-btn").forEach((btn) => {
+        btn.disabled = true;
+        btn.style.opacity = "0.5";
+      });
+    }
+  }
 }
 
 function openEditForm(marker) {
@@ -400,8 +618,10 @@ function openEditForm(marker) {
     <div class="quick-form">
       <input id="addr" type="text" value="${escapeAttr(
         marker.address || ""
-      )}" />
-      <textarea id="desc">${escapeHtml(marker.description || "")}</textarea>
+      )}" autocomplete="off" />
+      <textarea id="desc" autocomplete="off">${escapeHtml(
+        marker.description || ""
+      )}</textarea>
       <div class="actions">
         <button class="primary" id="update">Actualizar</button>
       </div>
@@ -409,6 +629,20 @@ function openEditForm(marker) {
   `;
 
   popup.setDOMContent(content).setLngLat([marker.lng, marker.lat]).addTo(map);
+
+  // Prevenir foco automático en móviles
+  const addrEl = content.querySelector("#addr");
+  const descEl = content.querySelector("#desc");
+  if (addrEl) {
+    addrEl.blur();
+    addrEl.setAttribute("inputmode", "none");
+    setTimeout(() => addrEl.removeAttribute("inputmode"), 100);
+  }
+  if (descEl) {
+    descEl.blur();
+    descEl.setAttribute("inputmode", "none");
+    setTimeout(() => descEl.removeAttribute("inputmode"), 100);
+  }
 
   content.querySelector("#update").addEventListener("click", async () => {
     const address = content.querySelector("#addr").value.trim();
@@ -442,10 +676,14 @@ async function deleteHouse(id) {
 
     const idx = markers.findIndex((m) => m.id === id);
     if (idx !== -1) {
-      try { markers[idx].remove(); } catch (_) {}
+      try {
+        markers[idx].remove();
+      } catch (_) {}
       markers.splice(idx, 1);
     }
-    try { popup.remove(); } catch (_) {}
+    try {
+      popup.remove();
+    } catch (_) {}
   } catch (e) {
     console.error("Error deleting house:", e);
   }
@@ -511,14 +749,38 @@ function updateMarkersVisibility() {
     } else if (!visible && m._visible) {
       m.remove();
       m._visible = false;
-      if (currentDetailMarker && m === currentDetailMarker) shouldCloseInfo = true;
+      if (currentDetailMarker && m === currentDetailMarker)
+        shouldCloseInfo = true;
     }
   });
 
   if (shouldCloseInfo) {
-    try { popup.remove(); } catch (_) {}
+    try {
+      popup.remove();
+    } catch (_) {}
     currentDetailMarker = null;
   }
+}
+
+// Actualiza visibilidad de emojis según distancia al centro del mapa
+function updateEmojiVisibility() {
+  if (!map) return;
+  const center = map.getCenter();
+  const cLat = center.lat;
+  const cLng = center.lng;
+
+  emojiMarkers.forEach((m) => {
+    const dist = haversineMeters(cLat, cLng, m.lat, m.lng);
+    const visible = dist <= PROXIMITY_RADIUS_METERS;
+
+    if (visible && !m._visible) {
+      m.addTo(map);
+      m._visible = true;
+    } else if (!visible && m._visible) {
+      m.remove();
+      m._visible = false;
+    }
+  });
 }
 
 // -------- Top 10 Lógica --------
@@ -549,8 +811,12 @@ function renderTopList(list) {
     el.innerHTML = `
       <div class="top-rank">${idx + 1}</div>
       <div class="top-content">
-        <div class="top-title">${escapeHtml(item.address || "Sin dirección")}</div>
-        <div class="top-desc">${escapeHtml(item.description || "Sin descripción")}</div>
+        <div class="top-title">${escapeHtml(
+          item.address || "Sin dirección"
+        )}</div>
+        <div class="top-desc">${escapeHtml(
+          item.description || "Sin descripción"
+        )}</div>
         <div class="top-meta">💬 ${item.comment_count || 0} comentarios</div>
       </div>
     `;

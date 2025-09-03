@@ -13,6 +13,17 @@ const ALLOWED_REACTIONS = new Set([
   "angry",
 ]);
 
+// Emojis permitidos para ubicaciones
+const ALLOWED_EMOJIS = {
+  NOV: "❤️",
+  AMA: "💋",
+  GAY: "🏳️‍🌈",
+  EX: "💔",
+  COM: "💍",
+  ROL: "🔥",
+  FAL: "🎭",
+};
+
 // Obtener todas las viviendas
 router.get("/", (req, res) => {
   const query = "SELECT * FROM houses ORDER BY created_at DESC";
@@ -509,6 +520,159 @@ router.get("/top", (req, res) => {
       return res.status(500).json({ error: "Error interno del servidor" });
     }
     res.json(rows);
+  });
+});
+
+// -------- Emoji Routes --------
+
+// Obtener emojis en un área específica
+router.get("/emojis", (req, res) => {
+  const { north, south, east, west } = req.query;
+
+  if (!north || !south || !east || !west) {
+    return res.status(400).json({ error: "Faltan parámetros de límites" });
+  }
+
+  const query = `
+    SELECT id, lat, lng, emoji, emoji_type, created_at
+    FROM location_emojis
+    WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+    ORDER BY created_at DESC
+  `;
+
+  db.query(query, [south, north, west, east], (err, results) => {
+    if (err) {
+      // Si la tabla no existe, devolver array vacío
+      if (err.code === "ER_NO_SUCH_TABLE") {
+        console.log(
+          "Tabla location_emojis no existe aún, devolviendo array vacío"
+        );
+        return res.json([]);
+      }
+      console.error("Error obteniendo emojis:", err);
+      return res.status(500).json({ error: "Error interno del servidor" });
+    }
+    res.json(results);
+  });
+});
+
+// Colocar un emoji en una ubicación
+router.post("/emojis", (req, res) => {
+  const { lat, lng, emoji_type } = req.body;
+
+  if (!lat || !lng || !emoji_type) {
+    return res.status(400).json({ error: "Faltan campos requeridos" });
+  }
+
+  if (!ALLOWED_EMOJIS[emoji_type]) {
+    return res.status(400).json({ error: "Tipo de emoji inválido" });
+  }
+
+  // Obtener o generar token
+  let token = getCookieFromHeader(req, "reaction_token");
+  let setCookieHeader = null;
+  if (!token || token.length !== 64) {
+    token = crypto.randomBytes(32).toString("hex");
+    const cookie = `reaction_token=${encodeURIComponent(token)}; Max-Age=${
+      60 * 60 * 24 * 365 * 2
+    }; Path=/; SameSite=Lax`;
+    setCookieHeader = cookie;
+  }
+
+  // Verificar límite diario (5 emojis por día)
+  const countQuery = `
+    SELECT COUNT(*) as count
+    FROM location_emojis
+    WHERE reaction_token = ? AND DATE(created_at) = CURDATE()
+  `;
+
+  db.query(countQuery, [token], (err, countResults) => {
+    if (err) {
+      if (err.code === "ER_NO_SUCH_TABLE") {
+        // Si la tabla no existe, permitir colocar emoji (count = 0)
+        countResults = [{ count: 0 }];
+      } else {
+        console.error("Error verificando límite diario:", err);
+        return res.status(500).json({ error: "Error interno del servidor" });
+      }
+    }
+
+    if (countResults[0].count >= 5) {
+      return res
+        .status(429)
+        .json({ error: "Has alcanzado el límite diario de 5 emojis" });
+    }
+
+    // Insertar emoji
+    const insertQuery = `
+      INSERT INTO location_emojis (lat, lng, emoji, emoji_type, reaction_token)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+
+    const emoji = ALLOWED_EMOJIS[emoji_type];
+
+    db.query(
+      insertQuery,
+      [lat, lng, emoji, emoji_type, token],
+      (err, results) => {
+        if (err) {
+          if (err.code === "ER_NO_SUCH_TABLE") {
+            return res.status(500).json({
+              error:
+                "La tabla de emojis no existe. Ejecuta la migración emoji_migration.sql primero.",
+            });
+          }
+          console.error("Error insertando emoji:", err);
+          return res.status(500).json({ error: "Error interno del servidor" });
+        }
+
+        const payload = {
+          id: results.insertId,
+          lat,
+          lng,
+          emoji,
+          emoji_type,
+          created_at: new Date(),
+        };
+
+        if (setCookieHeader) {
+          res.setHeader("Set-Cookie", setCookieHeader);
+        }
+
+        res.status(201).json(payload);
+      }
+    );
+  });
+});
+
+// Obtener conteo diario de emojis colocados por el usuario
+router.get("/emojis/daily-count", (req, res) => {
+  const token = getCookieFromHeader(req, "reaction_token");
+
+  if (!token) {
+    return res.json({ count: 0, limit: 5 });
+  }
+
+  const query = `
+    SELECT COUNT(*) as count
+    FROM location_emojis
+    WHERE reaction_token = ? AND DATE(created_at) = CURDATE()
+  `;
+
+  db.query(query, [token], (err, results) => {
+    if (err) {
+      if (err.code === "ER_NO_SUCH_TABLE") {
+        return res.json({ count: 0, limit: 5, remaining: 5 });
+      }
+      console.error("Error obteniendo conteo diario:", err);
+      return res.status(500).json({ error: "Error interno del servidor" });
+    }
+
+    res.json({
+      count: results[0].count,
+      limit: 5,
+      remaining: Math.max(0, 5 - results[0].count),
+    });
   });
 });
 

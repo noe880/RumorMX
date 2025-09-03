@@ -93,7 +93,9 @@ body {
   cursor: pointer;
   background: #ffffff;
 }
-.top-item:hover { background: #f9fafb; }
+.top-item:hover {
+  background: #f9fafb;
+}
 .top-rank {
   font-weight: 800;
   color: #2563eb;
@@ -135,9 +137,24 @@ body {
   text-decoration: underline;
 }
 
-.top-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.top-desc { color: #6b7280; font-size: 12px; white-space: normal; max-height: 60px; overflow-y: auto; }
-.top-meta { color: #9ca3af; font-size: 12px; }
+.top-title {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.top-desc {
+  color: #6b7280;
+  font-size: 12px;
+  white-space: normal;
+  max-height: 60px;
+  overflow-y: auto;
+}
+.top-meta {
+  color: #9ca3af;
+  font-size: 12px;
+}
 
 /* ======================
    Marcadores (chips)
@@ -178,7 +195,11 @@ body {
 }
 
 .infowindow {
-  width: clamp(300px, 85vw, 420px); /* Ligeramente más ancho para mejor legibilidad */
+  width: clamp(
+    300px,
+    85vw,
+    420px
+  ); /* Ligeramente más ancho para mejor legibilidad */
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -373,9 +394,9 @@ body {
 .mapboxgl-popup-content {
   padding: 12px !important;
   border-radius: 12px !important;
-  width: auto !important;          /* permite que el contenido gestione el ancho */
-  max-width: 440px !important;     /* Aumentado para acomodar el nuevo diseño */
-  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  width: auto !important; /* permite que el contenido gestione el ancho */
+  max-width: 440px !important; /* Aumentado para acomodar el nuevo diseño */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
 }
 /* Asegurar buena posición y clic cómodo del botón cerrar */
 .mapboxgl-popup-close-button {
@@ -387,24 +408,24 @@ body {
   border-radius: 6px;
 }
 .mapboxgl-popup-close-button:hover {
-  background: rgba(0,0,0,0.06);
+  background: rgba(0, 0, 0, 0.06);
 }
 /* Forzar scroll vertical solo en la sección de comentarios */
 .mapboxgl-popup-content .infowindow {
-  max-height: 70vh;          /* Mayor altura para dar espacio a la descripción */
-  overflow: visible;         /* permitir que el contenido se expanda */
+  max-height: 70vh; /* Mayor altura para dar espacio a la descripción */
+  overflow: visible; /* permitir que el contenido se expanda */
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
 .mapboxgl-popup-content .comments-section {
-  overflow-y: auto;          /* scroll solo en comentarios */
+  overflow-y: auto; /* scroll solo en comentarios */
   overscroll-behavior: contain;
-  min-height: 0;             /* permitir que se encoja */
-  max-height: 220px;         /* límite máximo para comentarios */
+  min-height: 0; /* permitir que se encoja */
+  max-height: 220px; /* límite máximo para comentarios */
 }
 .mapboxgl-popup-content .comment-form {
-  flex-shrink: 0;            /* no se encoja */
+  flex-shrink: 0; /* no se encoja */
   margin-top: 10px;
 }
 
@@ -517,4 +538,142 @@ body {
   textarea {
     font-size: 16px !important;
   }
+}
+
+/* ======================
+   Estilos para Emojis
+   ====================== */
+.emoji-section {
+  border-top: 1px solid #e5e7eb;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.emoji-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.emoji-grid {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  margin-bottom: 8px;
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.emoji-btn {
+  width: 60px;
+  height: 50px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 4px;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.emoji-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.emoji-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.emoji-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+  transform: scale(1.05);
+}
+
+.emoji-btn:active {
+  transform: scale(0.95);
+}
+
+.emoji-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.emoji-btn:disabled .emoji-label {
+  color: #9ca3af;
+}
+
+/* Estilos responsivos para emojis */
+@media (max-width: 768px) {
+  .emoji-btn {
+    width: 50px;
+    height: 42px;
+    padding: 3px;
+  }
+
+  .emoji-icon {
+    font-size: 18px;
+  }
+
+  .emoji-label {
+    font-size: 9px;
+  }
+
+  .emoji-grid {
+    gap: 4px;
+    padding: 2px 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .emoji-btn {
+    width: 45px;
+    height: 38px;
+    padding: 2px;
+  }
+
+  .emoji-icon {
+    font-size: 16px;
+  }
+
+  .emoji-label {
+    font-size: 8px;
+  }
+
+  .emoji-grid {
+    gap: 3px;
+  }
+}
+
+.emoji-status {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+
+/* Estilos para marcadores de emoji en el mapa */
+.emoji-marker {
+  font-size: 24px;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+  user-select: none;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.emoji-marker:hover {
+  transform: scale(1.1);
 }
