@@ -465,51 +465,85 @@ router.delete("/:id/reactions", (req, res) => {
 // Top houses with improved algorithm (time-weighted engagement)
 router.get("/top", (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 10;
+
   const q = `
     SELECT h.*,
            COALESCE(rc.reaction_count, 0) AS reaction_count,
-           (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count,
+           COALESCE(c.total_comments, 0) AS comment_count,
            (
-             -- Base score: reactions + comments * 2
+             -- Base score: reactions + comments * weight
              COALESCE(rc.reaction_count, 0) +
-             (SELECT COUNT(*) FROM comments WHERE house_id = h.id) * 2 +
-             -- Recency bonus: recent activity (last 7 days) * 1.5
-             COALESCE(rc_recent.recent_reactions, 0) * 1.5 +
-             (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) * 3 +
-             -- Super recency bonus: last 24 hours * 2
-             COALESCE(rc_today.recent_reactions, 0) * 2 +
-             (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) * 4
-           ) * EXP(-DATEDIFF(NOW(), h.created_at) * 0.02) AS engagement_score
+             COALESCE(c.total_comments, 0) * @w_comment +
+             -- Recency bonus (last 7 days)
+             COALESCE(rc.recent_7d, 0) * @w_reactions_7d +
+             COALESCE(c.comments_7d, 0) * @w_comments_7d +
+             -- Super recency bonus (last 24 hours)
+             COALESCE(rc.recent_1d, 0) * @w_reactions_1d +
+             COALESCE(c.comments_1d, 0) * @w_comments_1d
+           ) * EXP(-DATEDIFF(NOW(), h.created_at) * @decay) AS engagement_score
     FROM houses h
+    -- Total and recent comments
     LEFT JOIN (
-      SELECT house_id, COUNT(*) AS reaction_count
+      SELECT house_id,
+             COUNT(*) AS total_comments,
+             SUM(created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS comments_7d,
+             SUM(created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) AS comments_1d
+      FROM comments
+      GROUP BY house_id
+    ) c ON c.house_id = h.id
+    -- Total and recent reactions
+    LEFT JOIN (
+      SELECT house_id,
+             COUNT(*) AS reaction_count,
+             SUM(created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS recent_7d,
+             SUM(created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) AS recent_1d
       FROM comment_reactions
       WHERE house_id IS NOT NULL
       GROUP BY house_id
     ) rc ON rc.house_id = h.id
-    LEFT JOIN (
-      SELECT house_id, COUNT(*) AS recent_reactions
-      FROM comment_reactions
-      WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-      GROUP BY house_id
-    ) rc_recent ON rc_recent.house_id = h.id
-    LEFT JOIN (
-      SELECT house_id, COUNT(*) AS recent_reactions
-      FROM comment_reactions
-      WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
-      GROUP BY house_id
-    ) rc_today ON rc_today.house_id = h.id
-    ORDER BY (engagement_score * (1 + (RAND(UNIX_TIMESTAMP(CURDATE())) * 0.6 - 0.3))) DESC, h.created_at DESC
+    -- Order with randomness factor
+    ORDER BY (engagement_score * (1 + (RAND() * 0.6 - 0.3))) DESC, h.created_at DESC
     LIMIT ?
   `;
 
-  db.query(q, [limit], (err, rows) => {
-    if (err) {
-      console.error("Error obteniendo top de viviendas:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
+  // Pesos configurables (puedes ajustarlos según quieras)
+  const weights = {
+    w_comment: 2,
+    w_reactions_7d: 1.5,
+    w_comments_7d: 3,
+    w_reactions_1d: 2,
+    w_comments_1d: 4,
+    decay: 0.02,
+  };
+
+  db.query(
+    `
+      SET @w_comment = ?;
+      SET @w_reactions_7d = ?;
+      SET @w_comments_7d = ?;
+      SET @w_reactions_1d = ?;
+      SET @w_comments_1d = ?;
+      SET @decay = ?;
+      ${q}
+    `,
+    [
+      weights.w_comment,
+      weights.w_reactions_7d,
+      weights.w_comments_7d,
+      weights.w_reactions_1d,
+      weights.w_comments_1d,
+      weights.decay,
+      limit,
+    ],
+    (err, rows) => {
+      if (err) {
+        console.error("Error obteniendo top de viviendas:", err);
+        return res.status(500).json({ error: "Error interno del servidor" });
+      }
+      // Como hicimos varios SETs, el resultado de interés está en el último query
+      res.json(rows[rows.length - 1]);
     }
-    res.json(rows);
-  });
+  );
 });
 
 module.exports = router;
