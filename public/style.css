@@ -201,8 +201,8 @@ body {
   line-height: 1.5;
   font-size: 14px;
   overflow-wrap: anywhere;
-  max-height: none;
-  overflow-y: visible;
+  max-height: 1000px;
+  overflow-y: auto;
 }
 .infowindow .desc::-webkit-scrollbar {
   width: 5px;
@@ -367,7 +367,8 @@ body {
   }
   .infowindow .desc {
     font-size: 13px;
-    max-height: 35vh;
+    max-height: 90vh;
+    overflow-y: auto;
   }
   .infowindow button {
     padding: 12px 10px;
