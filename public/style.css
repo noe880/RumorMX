@@ -50,7 +50,6 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 10px 30px rgb(255, 255, 255);
 }
 .menu-button:hover {
   background: rgb(255, 255, 255);
@@ -202,9 +201,8 @@ body {
   line-height: 1.5;
   font-size: 14px;
   overflow-wrap: anywhere;
-  max-height: 40vh;
-  overflow-y: auto;
-  padding-right: 5px;
+  max-height: none;
+  overflow-y: visible;
 }
 .infowindow .desc::-webkit-scrollbar {
   width: 5px;
