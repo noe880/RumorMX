@@ -81,7 +81,7 @@ function createMarker(position, address, description, id = null) {
   emoji.className = "emoji";
   emoji.textContent = "🏠";
   const text = document.createElement("span");
-  text.textContent = description ? trimText(description, 18) : "Nueva nota";
+  text.textContent = address ? trimText(address, 18) : "Nueva nota";
   chip.appendChild(emoji);
   chip.appendChild(text);
 
@@ -137,7 +137,7 @@ function openDetail(marker) {
     <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
     <div class="desc">${escapeHtml(marker.description || "Sin descripción")}</div>
 
-    <div class="house-reactions-section" style="padding: 10px; border: 1px solid #ffffff; border-radius: 8px; background: #ffffffff;">
+    <div class="house-reactions-section" style="padding: 0 10px; border: 1px solid #ffffff; border-radius: 8px; background: #ffffffff;">
       <div class="house-reactions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
     </div>
 
@@ -145,7 +145,7 @@ function openDetail(marker) {
       <div class="comments-title"><strong>Comentarios</strong></div>
       <div class="comments-list"></div>
     </div>
-    <div class="comment-form quick-form" style="padding: 10px;">
+    <div class="comment-form quick-form" style="padding: 0 10px;">
       <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" />
       <div class="actions">
         <button class="primary" id="comment-submit">

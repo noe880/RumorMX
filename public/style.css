@@ -202,7 +202,6 @@ body {
   padding: 6px; /* Más espacio para mejor legibilidad */
   border-radius: 6px;
   max-height: none; /* Permitir que crezca según el contenido */
-  margin-bottom: 10px;
 }
 
 .infowindow .desc::-webkit-scrollbar {
@@ -238,7 +237,6 @@ body {
    Sección de Comentarios - MEJORADA
    ====================== */
 .comments-section {
-  margin-top: 15px;
   border-top: 1px solid #e5e7eb;
   padding-top: 15px;
   max-height: 220px; /* Altura reducida para dar prioridad a la descripción */
