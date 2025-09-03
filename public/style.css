@@ -167,7 +167,7 @@ body {
 }
 
 /* ======================
-   InfoWindow contenido
+   InfoWindow contenido - MEJORADO
    ====================== */
 .gm-style .gm-style-iw,
 .gm-style .gm-style-iw-c {
@@ -178,37 +178,37 @@ body {
 }
 
 .infowindow {
-  width: clamp(
-    300px,
-    85vw,
-    400px
-  ); /* Más robusto: mínimo 300px, máximo 400px */
+  width: clamp(300px, 85vw, 420px); /* Ligeramente más ancho para mejor legibilidad */
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   overflow: hidden;
 }
 .infowindow .title {
   font-weight: 700;
   margin-bottom: 4px;
-  font-size: 16px;
+  font-size: 19px; /* Aumentado para mejor legibilidad */
   line-height: 1.4;
   word-wrap: break-word;
 }
 .infowindow .desc {
   color: #374151;
   white-space: pre-wrap;
-  line-height: 1.5;
-  font-size: 14px;
+  line-height: 1.6; /* Mejor interlineado */
+  font-size: 16px; /* Aumentado para mejor legibilidad */
   overflow-wrap: anywhere;
-  max-height: 1000px;
+  height: auto;
   overflow-y: auto;
+  padding: 6px; /* Más espacio para mejor legibilidad */
+  border-radius: 6px;
+  max-height: none; /* Permitir que crezca según el contenido */
+  margin-bottom: 10px;
 }
+
 .infowindow .desc::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
 }
 .infowindow .desc::-webkit-scrollbar-thumb {
-  background: #d1d5db;
   border-radius: 10px;
 }
 .infowindow .actions {
@@ -232,6 +232,70 @@ body {
 .infowindow .danger {
   background: #ef4444;
   color: white;
+}
+
+/* ======================
+   Sección de Comentarios - MEJORADA
+   ====================== */
+.comments-section {
+  margin-top: 15px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 15px;
+  max-height: 220px; /* Altura reducida para dar prioridad a la descripción */
+  overflow-y: auto;
+}
+
+.comment {
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #f9fafb;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* ======================
+   Formulario de comentarios COMPACTO - NUEVO
+   ====================== */
+.comment-form.quick-form {
+  display: flex;
+  flex-direction: row; /* Input y botón en la misma línea */
+  gap: 8px;
+  padding: 10px;
+  align-items: center;
+  margin-top: 12px;
+  background: #f8f9fa;
+  border-radius: 12px;
+}
+
+.comment-form.quick-form input {
+  flex: 1; /* Ocupa todo el espacio disponible */
+  padding: 10px 14px;
+  border-radius: 20px; /* Bordes redondeados para coincidir con el botón */
+  border: 1px solid #e5e7eb;
+  font-size: 14px;
+  font-family: inherit;
+  margin: 0;
+}
+
+.comment-form.quick-form .actions {
+  margin: 0;
+  flex-shrink: 0; /* Evita que se reduzca */
+}
+
+#comment-submit {
+  padding: 10px; /* Botón cuadrado pequeño */
+  width: 40px;
+  height: 40px;
+  border-radius: 50%; /* Botón circular */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px; /* Tamaño del icono */
+}
+
+/* Icono de enviar (puede reemplazarse con una imagen SVG) */
+#comment-submit::before {
+  content: "→";
 }
 
 /* ======================
@@ -312,7 +376,7 @@ body {
   padding: 12px !important;
   border-radius: 12px !important;
   width: auto !important;          /* permite que el contenido gestione el ancho */
-  max-width: 420px !important;     /* suficiente para .infowindow (hasta 400px) */
+  max-width: 440px !important;     /* Aumentado para acomodar el nuevo diseño */
   box-shadow: 0 10px 30px rgba(0,0,0,0.15);
 }
 /* Asegurar buena posición y clic cómodo del botón cerrar */
@@ -329,23 +393,21 @@ body {
 }
 /* Forzar scroll vertical solo en la sección de comentarios */
 .mapboxgl-popup-content .infowindow {
-  max-height: 60vh;          /* altura controlada para pantallas pequeñas */
+  max-height: 70vh;          /* Mayor altura para dar espacio a la descripción */
   overflow: visible;         /* permitir que el contenido se expanda */
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
-.comments-section {
-  flex-grow: 1;              /* ocupar el espacio disponible */
+.mapboxgl-popup-content .comments-section {
   overflow-y: auto;          /* scroll solo en comentarios */
   overscroll-behavior: contain;
   min-height: 0;             /* permitir que se encoja */
+  max-height: 220px;         /* límite máximo para comentarios */
 }
-.comment-form {
+.mapboxgl-popup-content .comment-form {
   flex-shrink: 0;            /* no se encoja */
-  border-top: 1px solid #e5e7eb; /* separador */
   margin-top: 10px;
-  padding-top: 10px;
 }
 
 /* ======================
@@ -353,26 +415,41 @@ body {
    ====================== */
 @media (max-width: 1024px) {
   .infowindow {
-    width: clamp(280px, 80vw, 350px);
+    width: clamp(280px, 80vw, 380px);
   }
 }
 
 @media (max-width: 768px) {
   .infowindow {
     width: 82vw;
-    gap: 8px;
+    gap: 10px;
   }
   .infowindow .title {
-    font-size: 15px;
+    font-size: 18px;
   }
   .infowindow .desc {
-    font-size: 13px;
-    max-height: 90vh;
-    overflow-y: auto;
+    font-size: 15px;
+    padding: 5px;
   }
   .infowindow button {
     padding: 12px 10px;
     font-size: 13px;
+  }
+  .comments-section {
+    max-height: 180px;
+  }
+  .comment-form.quick-form {
+    flex-direction: row; /* Mantener en fila incluso en móviles */
+    padding: 8px;
+  }
+  .comment-form.quick-form input {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  #comment-submit {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
   }
   .quick-form input,
   .quick-form textarea {
@@ -400,11 +477,30 @@ body {
     width: 80vw;
   }
   .infowindow .title {
+    font-size: 17px;
+  }
+  .infowindow .desc {
     font-size: 14px;
+    line-height: 1.5;
   }
   .infowindow button {
     padding: 10px 8px;
     font-size: 12px;
+  }
+  .comments-section {
+    max-height: 160px;
+  }
+  .comment-form.quick-form {
+    padding: 6px;
+  }
+  .comment-form.quick-form input {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  #comment-submit {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
   }
   .quick-form textarea {
     min-height: 80px;

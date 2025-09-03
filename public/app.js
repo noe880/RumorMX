@@ -137,7 +137,7 @@ function openDetail(marker) {
     <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
     <div class="desc">${escapeHtml(marker.description || "Sin descripción")}</div>
 
-    <div class="house-reactions-section" style="margin: 10px 0; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb;">
+    <div class="house-reactions-section" style="padding: 10px; border: 1px solid #ffffff; border-radius: 8px; background: #ffffffff;">
       <div class="house-reactions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
     </div>
 
@@ -148,7 +148,9 @@ function openDetail(marker) {
     <div class="comment-form quick-form" style="padding: 10px;">
       <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" />
       <div class="actions">
-        <button class="primary" id="comment-submit">Comentar</button>
+        <button class="primary" id="comment-submit">
+          <i class="fa-solid"></i>
+        </button>
       </div>
     </div>
   `;
