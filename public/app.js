@@ -1,14 +1,14 @@
 let map;
 let markers = [];
-let infoWindow;
+let popup;
 let currentDetailMarker = null;
 
 // Limites aproximados de México (para restringir el viewport)
 const MEXICO_BOUNDS = {
-  north: 33.0,
-  south: 14.0,
-  west: -118.5,
-  east: -86.5,
+  north: 28.7,
+  south: 18.5,
+  west: -115.4,
+  east: -88.7,
 };
 
 window.addEventListener("load", async () => {
@@ -19,68 +19,57 @@ window.addEventListener("load", async () => {
 async function initMap() {
   const center = { lat: 23.6345, lng: -102.5528 };
 
-  const { Map } = await google.maps.importLibrary("maps");
-  const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+  const token = (window.MAPBOX_TOKEN || "").trim();
+  if (!token) {
+    alert("Falta el token de Mapbox. Define window.MAPBOX_TOKEN en index.html");
+    return;
+  }
+  mapboxgl.accessToken = token;
 
-  // Crear mapa full-screen
-  map = new Map(document.getElementById("map"), {
-    center,
+  // Crear mapa full-screen con límites de México
+  map = new mapboxgl.Map({
+    container: "map",
+    style: "mapbox://styles/mapbox/streets-v12",
+    center: [center.lng, center.lat],
     zoom: 5,
-    mapId: "DEMO_MAP_ID",
-    restriction: {
-      latLngBounds: MEXICO_BOUNDS,
-      strictBounds: true,
-    },
-    // UI minimalista
-    fullscreenControl: false,
-    streetViewControl: false,
-    mapTypeControl: false,
-    gestureHandling: "greedy",
+    minZoom: 5,
+    maxBounds: [
+      [MEXICO_BOUNDS.west, MEXICO_BOUNDS.south], // SW [lng, lat]
+      [MEXICO_BOUNDS.east, MEXICO_BOUNDS.north], // NE [lng, lat]
+    ],
+    bearingSnap: 0,
+    pitchWithRotate: false,
   });
 
-  // Limitar el panning fuera de México (seguridad extra)
-  map.addListener("dragend", () => {
-    const c = map.getCenter();
-    const lat = Math.min(
-      Math.max(c.lat(), MEXICO_BOUNDS.south),
-      MEXICO_BOUNDS.north
-    );
-    const lng = Math.min(
-      Math.max(c.lng(), MEXICO_BOUNDS.west),
-      MEXICO_BOUNDS.east
-    );
-    if (lat !== c.lat() || lng !== c.lng()) map.setCenter({ lat, lng });
+  popup = new mapboxgl.Popup({
+    closeButton: true,
+    closeOnClick: false,
+    offset: 28, // separación vertical del marcador
+    anchor: "bottom", // siempre mostrar arriba de la nota
   });
 
-  infoWindow = new google.maps.InfoWindow();
+  map.on("load", async () => {
+    await loadHouses();
+    preloadTopNotes();
 
-  await loadHouses();
-  // precargar top si se desea al abrir panel (no visible hasta click)
-  preloadTopNotes();
+    updateMarkersVisibility();
 
-  // Actualizar visibilidad con movimiento/zoom
-  map.addListener("idle", updateMarkersVisibility);
-  map.addListener("zoom_changed", updateMarkersVisibility);
+    map.on("moveend", updateMarkersVisibility);
+    map.on("zoomend", updateMarkersVisibility);
 
-  // cerrar panel si se hace click en el mapa (opcional)
-  const panel = document.getElementById("side-panel");
-  if (panel) panel.classList.remove("open");
+    const panel = document.getElementById("side-panel");
+    if (panel) panel.classList.remove("open");
+  });
 
   // Crear nueva nota con click (solo si estás dentro del radio desde el centro)
-  map.addListener("click", (event) => {
-    const pos = event.latLng;
+  map.on("click", (e) => {
+    const pos = e.lngLat; // {lng, lat}
     const center = map.getCenter();
-    const dist = haversineMeters(
-      center.lat(),
-      center.lng(),
-      pos.lat(),
-      pos.lng()
-    );
+    const dist = haversineMeters(center.lat, center.lng, pos.lat, pos.lng);
     if (dist > PROXIMITY_RADIUS_METERS) {
-      //alert("Debes acercarte más para agregar una nota en ese lugar.");
       return;
     }
-    openCreateForm(pos);
+    openCreateForm({ lat: pos.lat, lng: pos.lng });
   });
 }
 
@@ -92,27 +81,25 @@ function createMarker(position, address, description, id = null) {
   emoji.className = "emoji";
   emoji.textContent = "🏠";
   const text = document.createElement("span");
-  text.textContent = address ? trimText(address, 18) : "Nueva nota";
+  text.textContent = description ? trimText(description, 18) : "Nueva nota";
   chip.appendChild(emoji);
   chip.appendChild(text);
 
-  const marker = new google.maps.marker.AdvancedMarkerElement({
-    map,
-    position,
-    content: chip,
-  });
+  const marker = new mapboxgl.Marker({ element: chip, anchor: "bottom" })
+    .setLngLat([position.lng, position.lat])
+    .addTo(map);
 
   marker.address = address;
   marker.description = description;
   marker.id = id;
+  // Guardar lat/lng como números para calcular distancias
+  marker.lat = position.lat;
+  marker.lng = position.lng;
+  marker.position = { lat: position.lat, lng: position.lng };
+  marker._visible = true;
 
-  // Guardamos la lat/lng como números para calcular distancias
-  marker.lat =
-    typeof position.lat === "function" ? position.lat() : position.lat;
-  marker.lng =
-    typeof position.lng === "function" ? position.lng() : position.lng;
-
-  marker.addListener("click", () => {
+  chip.addEventListener("click", (ev) => {
+    ev.stopPropagation();
     currentDetailMarker = marker;
     openDetail(marker);
   });
@@ -126,13 +113,8 @@ async function loadHouses() {
     const houses = await response.json();
 
     houses.forEach((house) => {
-      const position = new google.maps.LatLng(house.lat, house.lng);
-      const marker = createMarker(
-        position,
-        house.address,
-        house.description,
-        house.id
-      );
+      const position = { lat: house.lat, lng: house.lng };
+      const marker = createMarker(position, house.address, house.description, house.id);
       markers.push(marker);
     });
 
@@ -144,13 +126,16 @@ async function loadHouses() {
 }
 
 function openDetail(marker) {
+  // Centrar mapa sobre la nota para que el popup quede bien posicionado
+  try { map && map.easeTo({ center: [marker.lng, marker.lat], duration: 350 }); } catch (_) {}
+
+  console.log("Opening detail for marker:", marker.id, "description:", marker.description);
+
   const content = document.createElement("div");
   content.className = "infowindow";
   content.innerHTML = `
     <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
-    <div class="desc">${escapeHtml(
-      marker.description || "Sin descripción"
-    )}</div>
+    <div class="desc">${escapeHtml(marker.description || "Sin descripción")}</div>
 
     <div class="house-reactions-section" style="margin: 10px 0; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb;">
       <div class="house-reactions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
@@ -159,25 +144,26 @@ function openDetail(marker) {
     <div class="comments-section">
       <div class="comments-title"><strong>Comentarios</strong></div>
       <div class="comments-list"></div>
-      <div class="comment-form quick-form" style="padding: 10px;">
-      <br>
-        <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" />
-        <div class="actions">
-          <button class="primary" id="comment-submit">Comentar</button>
-        </div>
+    </div>
+    <div class="comment-form quick-form" style="padding: 10px;">
+      <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" />
+      <div class="actions">
+        <button class="primary" id="comment-submit">Comentar</button>
       </div>
     </div>
   `;
 
-  infoWindow.setContent(content);
-  infoWindow.setPosition(marker.position);
-
-  // Mostrar un poco más arriba (hacia arriba = valor negativo en Y)
-  infoWindow.setOptions({
-    pixelOffset: new google.maps.Size(0, -30),
-  });
-
-  infoWindow.open({ map });
+  // Mostrar popup arriba y ajustar el centro con un offset para dejar espacio
+  popup.setDOMContent(content).setLngLat([marker.lng, marker.lat]).addTo(map);
+  try {
+    const currentZoom = map.getZoom();
+    const targetZoom = Math.max(currentZoom, 15);
+    const pixelOffsetY = -100; // mueve el centro hacia arriba para que el popup se centre mejor en pantalla
+    const from = map.project([marker.lng, marker.lat]);
+    const to = { x: from.x, y: from.y + pixelOffsetY };
+    const toLngLat = map.unproject(to);
+    map.easeTo({ center: [toLngLat.lng, toLngLat.lat], zoom: targetZoom, duration: 350 });
+  } catch (_) {}
 
   // Si no hay ID, no se pueden cargar/enviar comentarios ni reacciones
   if (!marker.id) return;
@@ -188,6 +174,9 @@ function openDetail(marker) {
   const listEl = content.querySelector(".comments-list");
   const inputEl = content.querySelector("#comment-input");
   const submitEl = content.querySelector("#comment-submit");
+
+  // Prevent auto-focus on mobile to avoid keyboard appearing automatically
+  inputEl.blur();
 
   const renderComments = (comments) => {
     if (!Array.isArray(comments) || comments.length === 0) {
@@ -353,9 +342,7 @@ function openCreateForm(position) {
     </div>
   `;
 
-  infoWindow.setContent(content);
-  infoWindow.setPosition(position);
-  infoWindow.open({ map });
+  popup.setDOMContent(content).setLngLat([position.lng, position.lat]).addTo(map);
 
   // Auto-expand del textarea para evitar scroll
   const descEl = content.querySelector("#desc");
@@ -364,7 +351,6 @@ function openCreateForm(position) {
     el.style.height = el.scrollHeight + "px";
   };
   descEl.addEventListener("input", () => autoResize(descEl));
-  // inicializar por si hay texto pegado
   setTimeout(() => autoResize(descEl), 0);
 
   content.querySelector("#save").addEventListener("click", async () => {
@@ -376,8 +362,8 @@ function openCreateForm(position) {
       const houseData = {
         address,
         description,
-        lat: position.lat(),
-        lng: position.lng(),
+        lat: position.lat,
+        lng: position.lng,
       };
 
       const resp = await fetch("/api/houses", {
@@ -392,7 +378,7 @@ function openCreateForm(position) {
       const marker = createMarker(position, address, description, newHouse.id);
       markers.push(marker);
       // Centrar al nuevo marcador y actualizar visibilidad
-      map.setCenter(position);
+      map.setCenter([position.lng, position.lat]);
       updateMarkersVisibility();
       openDetail(marker);
     } catch (e) {
@@ -420,9 +406,7 @@ function openEditForm(marker) {
     </div>
   `;
 
-  infoWindow.setContent(content);
-  infoWindow.setPosition(marker.position);
-  infoWindow.open({ map });
+  popup.setDOMContent(content).setLngLat([marker.lng, marker.lat]).addTo(map);
 
   content.querySelector("#update").addEventListener("click", async () => {
     const address = content.querySelector("#addr").value.trim();
@@ -456,17 +440,17 @@ async function deleteHouse(id) {
 
     const idx = markers.findIndex((m) => m.id === id);
     if (idx !== -1) {
-      markers[idx].map = null; // remove from map
+      try { markers[idx].remove(); } catch (_) {}
       markers.splice(idx, 1);
     }
-    infoWindow.close();
+    try { popup.remove(); } catch (_) {}
   } catch (e) {
     console.error("Error deleting house:", e);
   }
 }
 
 // Configuración de proximidad (en metros)
-const PROXIMITY_RADIUS_METERS = 3000; // 3 km por defecto, ajústalo si quieres más/menos
+const PROXIMITY_RADIUS_METERS = 3000; // 3 km por defecto
 
 // Helpers
 function trimText(text, max) {
@@ -510,26 +494,27 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 function updateMarkersVisibility() {
   if (!map) return;
   const center = map.getCenter();
-  const cLat = center.lat();
-  const cLng = center.lng();
+  const cLat = center.lat;
+  const cLng = center.lng;
 
-  // Cerrar detalle si el marcador activo sale de rango
   let shouldCloseInfo = false;
 
   markers.forEach((m) => {
     const dist = haversineMeters(cLat, cLng, m.lat, m.lng);
     const visible = dist <= PROXIMITY_RADIUS_METERS;
 
-    // Mostrar/ocultar AdvancedMarkerElement
-    m.map = visible ? map : null;
-
-    if (!visible && currentDetailMarker && m === currentDetailMarker) {
-      shouldCloseInfo = true;
+    if (visible && !m._visible) {
+      m.addTo(map);
+      m._visible = true;
+    } else if (!visible && m._visible) {
+      m.remove();
+      m._visible = false;
+      if (currentDetailMarker && m === currentDetailMarker) shouldCloseInfo = true;
     }
   });
 
   if (shouldCloseInfo) {
-    infoWindow.close();
+    try { popup.remove(); } catch (_) {}
     currentDetailMarker = null;
   }
 }
@@ -562,22 +547,20 @@ function renderTopList(list) {
     el.innerHTML = `
       <div class="top-rank">${idx + 1}</div>
       <div class="top-content">
-        <div class="top-title">${escapeHtml(item.address || "Sin título")}</div>
-        <div class="top-desc">${escapeHtml(item.description || "")}</div>
+        <div class="top-title">${escapeHtml(item.address || "Sin dirección")}</div>
+        <div class="top-desc">${escapeHtml(item.description || "Sin descripción")}</div>
         <div class="top-meta">💬 ${item.comment_count || 0} comentarios</div>
       </div>
     `;
     el.addEventListener("click", () => {
-      // Buscar el marcador existente por id
       const marker = markers.find((m) => m.id === item.id);
       if (marker) {
-        const pos = new google.maps.LatLng(marker.lat, marker.lng);
-        map.setCenter(pos);
+        const pos = { lat: marker.lat, lng: marker.lng };
+        map.setCenter([pos.lng, pos.lat]);
         map.setZoom(17);
         openDetail(marker);
       } else {
-        // Si por alguna razón no está cargado, crear uno temporal
-        const position = new google.maps.LatLng(item.lat, item.lng);
+        const position = { lat: item.lat, lng: item.lng };
         const tempMarker = createMarker(
           position,
           item.address,
@@ -585,11 +568,10 @@ function renderTopList(list) {
           item.id
         );
         markers.push(tempMarker);
-        map.setCenter(position);
+        map.setCenter([position.lng, position.lat]);
         map.setZoom(17);
         openDetail(tempMarker);
       }
-      // Cerrar panel Top 10 al seleccionar
       const panel = document.getElementById("side-panel");
       if (panel) panel.classList.remove("open");
     });
@@ -646,8 +628,3 @@ function preloadTopNotes() {
   // Pre-carga silenciosa, pero no abre ni renderiza hasta click
   fetchTopNotes().catch(() => {});
 }
-
-// Manejo de error de Google Maps API
-window.gm_authFailure = function () {
-  alert("Error al cargar Google Maps. Verifique su clave API.");
-};

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RumorMX</title>
     <link rel="stylesheet" href="style.css" />
+    <link href="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="img/favicon.png" />
@@ -53,14 +54,14 @@
       </div>
     </div>
 
-    <!-- Tu lógica del mapa -->
-    <script src="app.js"></script>
+    <!-- Mapbox GL JS -->
+    <script src="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script>
+      // Define tu token de Mapbox aquí o inyéctalo desde el servidor
+      window.MAPBOX_TOKEN = (window.MAPBOX_TOKEN || "").trim() || "pk.eyJ1Ijoibm9lcmlvczg4MCIsImEiOiJjbWYzYmVtdmcwMXUwMmpvaGU1ajE0eHEyIn0.3KFQ5oxEiGrw-O6kY-4_bg";
+    </script>
 
-    <!-- Google Maps API optimizada -->
-    <script
-      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBdghJm5AT0-IKTFX7ZvNklo2HVHmKp5wQ"
-      async
-      defer
-    ></script>
+    <!-- App -->
+    <script src="app.js"></script>
   </body>
 </html>

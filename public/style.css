@@ -137,7 +137,7 @@ body {
 }
 
 .top-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.top-desc { color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-desc { color: #6b7280; font-size: 12px; white-space: normal; max-height: 60px; overflow-y: auto; }
 .top-meta { color: #9ca3af; font-size: 12px; }
 
 /* ======================
@@ -291,7 +291,7 @@ body {
 }
 
 /* ======================
-   Botón de cerrar InfoWindow
+   Botón de cerrar InfoWindow (Google Maps - legado)
    ====================== */
 .gm-ui-hover-effect {
   top: 8px !important;
@@ -302,6 +302,52 @@ body {
 .gm-ui-hover-effect img {
   width: 18px !important;
   height: 18px !important;
+}
+
+/* ======================
+   Mapbox Popup (nuevo)
+   ====================== */
+.mapboxgl-popup {
+  max-width: none !important; /* evitar límite global por defecto */
+}
+.mapboxgl-popup-content {
+  padding: 12px !important;
+  border-radius: 12px !important;
+  width: auto !important;          /* permite que el contenido gestione el ancho */
+  max-width: 420px !important;     /* suficiente para .infowindow (hasta 400px) */
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+}
+/* Asegurar buena posición y clic cómodo del botón cerrar */
+.mapboxgl-popup-close-button {
+  font-size: 18px;
+  right: 6px !important;
+  top: 6px !important;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.mapboxgl-popup-close-button:hover {
+  background: rgba(0,0,0,0.06);
+}
+/* Forzar scroll vertical solo en la sección de comentarios */
+.mapboxgl-popup-content .infowindow {
+  max-height: 60vh;          /* altura controlada para pantallas pequeñas */
+  overflow: visible;         /* permitir que el contenido se expanda */
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+.comments-section {
+  flex-grow: 1;              /* ocupar el espacio disponible */
+  overflow-y: auto;          /* scroll solo en comentarios */
+  overscroll-behavior: contain;
+  min-height: 0;             /* permitir que se encoja */
+}
+.comment-form {
+  flex-shrink: 0;            /* no se encoja */
+  border-top: 1px solid #e5e7eb; /* separador */
+  margin-top: 10px;
+  padding-top: 10px;
 }
 
 /* ======================
