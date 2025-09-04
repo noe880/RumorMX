@@ -1,6 +1,7 @@
 let map;
 let markers = [];
 let emojiMarkers = [];
+let clusterMarkers = [];
 let popup;
 let currentDetailMarker = null;
 
@@ -71,6 +72,7 @@ async function initMap() {
       await loadEmojis();
       updateMarkersVisibility();
       updateEmojiVisibility();
+      applyClustering();
     }, 300);
 
     map.on("moveend", refresh);
@@ -93,18 +95,34 @@ async function initMap() {
 }
 
 function createMarker(position, address, description, id = null) {
-  // Chip visual para el marcador
-  const chip = document.createElement("div");
-  chip.className = "marker-chip";
-  const emoji = document.createElement("span");
-  emoji.className = "emoji";
-  emoji.textContent = "🏠";
-  const text = document.createElement("span");
-  text.textContent = address ? trimText(address, 18) : "Nueva nota";
-  chip.appendChild(emoji);
-  chip.appendChild(text);
+  // Use canvas-based marker for better performance
+  const canvas = document.createElement("canvas");
+  canvas.width = 120;
+  canvas.height = 40;
+  canvas.style.cssText = "cursor: pointer;";
 
-  const marker = new mapboxgl.Marker({ element: chip, anchor: "bottom" })
+  const ctx = canvas.getContext("2d");
+
+  // Draw rounded rectangle background
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#e5e7eb";
+  ctx.lineWidth = 2;
+  roundRect(ctx, 2, 2, 116, 36, 12);
+  ctx.fill();
+  ctx.stroke();
+
+  // Draw emoji
+  ctx.font = "16px Arial";
+  ctx.fillStyle = "#000000";
+  ctx.fillText("🏠", 8, 24);
+
+  // Draw text
+  ctx.font = "12px Arial";
+  ctx.fillStyle = "#374151";
+  const displayText = address ? trimText(address, 12) : "Nueva nota";
+  ctx.fillText(displayText, 28, 24);
+
+  const marker = new mapboxgl.Marker({ element: canvas, anchor: "bottom" })
     .setLngLat([position.lng, position.lat])
     .addTo(map);
 
@@ -117,10 +135,75 @@ function createMarker(position, address, description, id = null) {
   marker.position = { lat: position.lat, lng: position.lng };
   marker._visible = true;
 
-  chip.addEventListener("click", (ev) => {
+  canvas.addEventListener("click", (ev) => {
     ev.stopPropagation();
     currentDetailMarker = marker;
     openDetail(marker);
+  });
+
+  return marker;
+}
+
+// Helper function to draw rounded rectangles
+function roundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function createClusterMarker(position, count) {
+  const size = Math.min(40 + count * 2, 60);
+  const canvas = document.createElement("canvas");
+  canvas.width = size + 4;
+  canvas.height = size + 4;
+  canvas.style.cssText = "cursor: pointer;";
+
+  const ctx = canvas.getContext("2d");
+
+  // Draw circle background
+  ctx.fillStyle = "#ff6b6b";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(size/2 + 2, size/2 + 2, size/2, 0, 2 * Math.PI);
+  ctx.fill();
+  ctx.stroke();
+
+  // Draw text
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `bold ${Math.min(14 + count * 0.5, 18)}px Arial`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const text = count > 99 ? "99+" : count.toString();
+  ctx.fillText(text, size/2 + 2, size/2 + 2);
+
+  const marker = new mapboxgl.Marker({ element: canvas, anchor: "center" })
+    .setLngLat([position.lng, position.lat])
+    .addTo(map);
+
+  marker.count = count;
+  marker.lat = position.lat;
+  marker.lng = position.lng;
+  marker.position = { lat: position.lat, lng: position.lng };
+  marker._visible = true;
+  marker.isCluster = true;
+
+  canvas.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    // Zoom in to expand cluster
+    map.easeTo({
+      center: [position.lng, position.lat],
+      zoom: Math.min(map.getZoom() + 2, 18),
+      duration: 500
+    });
   });
 
   return marker;
@@ -150,20 +233,20 @@ async function loadHouses() {
     houses.forEach((house) => {
       seen.add(house.id);
       if (byId.has(house.id)) {
-        // Opcional: actualizar datos si cambiaron
+        // Actualizar datos básicos disponibles
         const m = byId.get(house.id);
         m.address = house.address;
-        m.description = house.description;
         m.lat = house.lat;
         m.lng = house.lng;
         m.position = { lat: house.lat, lng: house.lng };
+        // No actualizar description ya que no viene en datos básicos
         return;
       }
       const position = { lat: house.lat, lng: house.lng };
       const marker = createMarker(
         position,
         house.address,
-        house.description,
+        null, // description será cargada bajo demanda
         house.id
       );
       markers.push(marker);
@@ -179,10 +262,62 @@ async function loadHouses() {
     }
     markers = keep;
 
+    // Apply clustering if too many markers
+    applyClustering();
+
     updateMarkersVisibility();
   } catch (error) {
     console.error("Error loading houses:", error);
   }
+}
+
+function applyClustering() {
+  // Clear existing cluster markers
+  clusterMarkers.forEach(m => {
+    try { m.remove(); } catch (_) {}
+  });
+  clusterMarkers = [];
+
+  const zoom = map.getZoom();
+  const visibleMarkers = markers.filter(m => m._visible);
+
+  // Only cluster if zoom is low and we have many markers
+  if (zoom > 12 || visibleMarkers.length < 20) {
+    return;
+  }
+
+  // Simple clustering: group markers within 0.01 degrees (~1km)
+  const clusters = new Map();
+
+  visibleMarkers.forEach(marker => {
+    const key = `${Math.round(marker.lat * 100) / 100}_${Math.round(marker.lng * 100) / 100}`;
+    if (!clusters.has(key)) {
+      clusters.set(key, []);
+    }
+    clusters.get(key).push(marker);
+  });
+
+  // Create cluster markers for groups with multiple markers
+  clusters.forEach((groupMarkers, key) => {
+    if (groupMarkers.length > 1) {
+      // Hide individual markers in this cluster
+      groupMarkers.forEach(m => {
+        try { m.remove(); } catch (_) {}
+        m._visible = false;
+      });
+
+      // Calculate cluster center
+      const centerLat = groupMarkers.reduce((sum, m) => sum + m.lat, 0) / groupMarkers.length;
+      const centerLng = groupMarkers.reduce((sum, m) => sum + m.lng, 0) / groupMarkers.length;
+
+      // Create cluster marker
+      const clusterMarker = createClusterMarker(
+        { lat: centerLat, lng: centerLng },
+        groupMarkers.length
+      );
+      clusterMarkers.push(clusterMarker);
+    }
+  });
 }
 
 async function loadEmojis() {
@@ -283,7 +418,7 @@ function createEmojiMarker(position, emoji, emojiType, id) {
 
 // Función showEmojiInfo removida - los emojis ya no muestran información al hacer click
 
-function openDetail(marker, shouldCenter = true) {
+async function openDetail(marker, shouldCenter = true) {
   // Centrar mapa sobre la nota para que el popup quede bien posicionado (opcional)
   if (shouldCenter) {
     try {
@@ -298,30 +433,12 @@ function openDetail(marker, shouldCenter = true) {
     marker.description
   );
 
+  // Mostrar loading mientras se cargan los detalles
   const content = document.createElement("div");
   content.className = "infowindow";
   content.innerHTML = `
     <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
-    <div class="desc">${escapeHtml(
-      marker.description || "Sin descripción"
-    )}</div>
-
-    <div class="house-reactions-section" style="padding: 0 10px; border: 1px solid #ffffff; border-radius: 8px; background: #ffffffff;">
-      <div class="house-reactions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
-    </div>
-
-    <div class="comments-section">
-      <div class="comments-title"><strong>Comentarios</strong></div>
-      <div class="comments-list"></div>
-    </div>
-    <div class="comment-form quick-form" style="padding: 0 10px;">
-      <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" autocomplete="off" />
-      <div class="actions">
-        <button class="primary" id="comment-submit">
-          <i class="fa-solid"></i>
-        </button>
-      </div>
-    </div>
+    <div class="desc" style="color:#6b7280;">Cargando detalles...</div>
   `;
 
   // Mostrar popup arriba y ajustar el centro con un offset para dejar espacio
@@ -343,81 +460,124 @@ function openDetail(marker, shouldCenter = true) {
   // Si no hay ID, no se pueden cargar/enviar comentarios ni reacciones
   if (!marker.id) return;
 
-  // Load house reactions
-  loadHouseReactions(marker.id, content);
+  try {
+    // Fetch detailed data
+    const response = await fetch(`/api/houses/${marker.id}/details`);
+    if (!response.ok) throw new Error('Failed to load house details');
 
-  const listEl = content.querySelector(".comments-list");
-  const inputEl = content.querySelector("#comment-input");
-  const submitEl = content.querySelector("#comment-submit");
+    const houseDetails = await response.json();
 
-  // Prevent auto-focus on mobile to avoid keyboard appearing automatically
-  inputEl.blur();
-  inputEl.setAttribute("inputmode", "none");
-  setTimeout(() => inputEl.removeAttribute("inputmode"), 100);
+    // Update marker with full data
+    marker.description = houseDetails.description;
+    marker.address = houseDetails.address;
 
-  const renderComments = (comments) => {
-    if (!Array.isArray(comments) || comments.length === 0) {
-      listEl.innerHTML =
-        '<div class="comment-empty" style="color:#6b7280;font-size:13px;">Sé el primero en comentar</div>';
-      return;
-    }
-    listEl.innerHTML = "";
-    comments.forEach((c) => {
-      const item = document.createElement("div");
-      item.className = "comment-item";
-      const when = c.created_at ? new Date(c.created_at).toLocaleString() : "";
+    // Render full content
+    content.innerHTML = `
+      <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
+      <div class="desc">${escapeHtml(
+        marker.description || "Sin descripción"
+      )}</div>
 
-      // Build HTML (text + meta only, reactions removed)
-      item.innerHTML = `
-        <div class="comment-text" style="white-space:pre-wrap;line-height:1.4;font-size:14px;">👤${escapeHtml(
-          c.comment || ""
-        )}</div>
-        <div class="comment-meta" style="color:#9ca3af;font-size:12px;margin-top:2px;">${escapeHtml(
-          when
-        )}</div>
-      `;
+      <div class="house-reactions-section" style="padding: 0 10px; border: 1px solid #ffffff; border-radius: 8px; background: #ffffffff;">
+        <div class="house-reactions" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+      </div>
 
-      listEl.appendChild(item);
-    });
-  };
+      <div class="comments-section">
+        <div class="comments-title"><strong>Comentarios</strong></div>
+        <div class="comments-list"></div>
+      </div>
+      <div class="comment-form quick-form" style="padding: 0 10px;">
+        <input id="comment-input" type="text" placeholder="Escribe un comentario..." maxlength="500" autocomplete="off" />
+        <div class="actions">
+          <button class="primary" id="comment-submit">
+            <i class="fa-solid"></i>
+          </button>
+        </div>
+      </div>
+    `;
 
-  const loadComments = async () => {
-    try {
-      listEl.innerHTML =
-        '<div style="color:#6b7280;font-size:13px;">Cargando comentarios...</div>';
-      const resp = await fetch(`/api/houses/${marker.id}/comments`);
-      if (!resp.ok) throw new Error(await resp.text());
-      const data = await resp.json();
-      renderComments(data);
-    } catch (e) {
-      console.error("Error cargando comentarios:", e);
-      listEl.innerHTML =
-        '<div style="color:#ef4444;font-size:13px;">No se pudieron cargar los comentarios</div>';
-    }
-  };
+    // Load house reactions
+    loadHouseReactions(marker.id, content);
 
-  submitEl.addEventListener("click", async () => {
-    const txt = (inputEl.value || "").trim();
-    if (!txt) return;
-    try {
-      submitEl.disabled = true;
-      const resp = await fetch(`/api/houses/${marker.id}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ comment: txt }),
+    const listEl = content.querySelector(".comments-list");
+    const inputEl = content.querySelector("#comment-input");
+    const submitEl = content.querySelector("#comment-submit");
+
+    // Prevent auto-focus on mobile to avoid keyboard appearing automatically
+    inputEl.blur();
+    inputEl.setAttribute("inputmode", "none");
+    setTimeout(() => inputEl.removeAttribute("inputmode"), 100);
+
+    const renderComments = (comments) => {
+      if (!Array.isArray(comments) || comments.length === 0) {
+        listEl.innerHTML =
+          '<div class="comment-empty" style="color:#6b7280;font-size:13px;">Sé el primero en comentar</div>';
+        return;
+      }
+      listEl.innerHTML = "";
+      comments.forEach((c) => {
+        const item = document.createElement("div");
+        item.className = "comment-item";
+        const when = c.created_at ? new Date(c.created_at).toLocaleString() : "";
+
+        // Build HTML (text + meta only, reactions removed)
+        item.innerHTML = `
+          <div class="comment-text" style="white-space:pre-wrap;line-height:1.4;font-size:14px;">👤${escapeHtml(
+            c.comment || ""
+          )}</div>
+          <div class="comment-meta" style="color:#9ca3af;font-size:12px;margin-top:2px;">${escapeHtml(
+            when
+          )}</div>
+        `;
+
+        listEl.appendChild(item);
       });
-      if (!resp.ok) throw new Error(await resp.text());
-      inputEl.value = "";
-      await loadComments();
-    } catch (e) {
-      console.error("Error enviando comentario:", e);
-      alert("No se pudo enviar el comentario");
-    } finally {
-      submitEl.disabled = false;
-    }
-  });
+    };
 
-  loadComments();
+    const loadComments = async () => {
+      try {
+        listEl.innerHTML =
+          '<div style="color:#6b7280;font-size:13px;">Cargando comentarios...</div>';
+        const resp = await fetch(`/api/houses/${marker.id}/comments`);
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        renderComments(data);
+      } catch (e) {
+        console.error("Error cargando comentarios:", e);
+        listEl.innerHTML =
+          '<div style="color:#ef4444;font-size:13px;">No se pudieron cargar los comentarios</div>';
+      }
+    };
+
+    submitEl.addEventListener("click", async () => {
+      const txt = (inputEl.value || "").trim();
+      if (!txt) return;
+      try {
+        submitEl.disabled = true;
+        const resp = await fetch(`/api/houses/${marker.id}/comments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: txt }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        inputEl.value = "";
+        await loadComments();
+      } catch (e) {
+        console.error("Error enviando comentario:", e);
+        alert("No se pudo enviar el comentario");
+      } finally {
+        submitEl.disabled = false;
+      }
+    });
+
+    loadComments();
+  } catch (error) {
+    console.error("Error loading house details:", error);
+    content.innerHTML = `
+      <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
+      <div class="desc" style="color:#ef4444;">Error al cargar los detalles</div>
+    `;
+  }
 }
 
 async function loadHouseReactions(houseId, content) {
@@ -825,6 +985,20 @@ function updateMarkersVisibility() {
     }
   });
 
+  // Update cluster visibility
+  clusterMarkers.forEach((m) => {
+    const dist = haversineMeters(cLat, cLng, m.lat, m.lng);
+    const visible = dist <= PROXIMITY_RADIUS_METERS;
+
+    if (visible && !m._visible) {
+      m.addTo(map);
+      m._visible = true;
+    } else if (!visible && m._visible) {
+      m.remove();
+      m._visible = false;
+    }
+  });
+
   if (shouldCloseInfo) {
     try {
       popup.remove();
@@ -967,3 +1141,60 @@ function preloadTopNotes() {
   // Pre-carga silenciosa, pero no abre ni renderiza hasta click
   fetchTopNotes().catch(() => {});
 }
+
+// Export functionality
+function setupExportButtons() {
+  const exportJsonBtn = document.getElementById('export-json');
+  const exportCsvBtn = document.getElementById('export-csv');
+
+  if (exportJsonBtn) {
+    exportJsonBtn.addEventListener('click', () => {
+      exportData('json');
+    });
+  }
+
+  if (exportCsvBtn) {
+    exportCsvBtn.addEventListener('click', () => {
+      exportData('csv');
+    });
+  }
+}
+
+async function exportData(format) {
+  try {
+    const response = await fetch(`/api/houses/export?format=${format}&limit=10000`);
+    if (!response.ok) throw new Error('Export failed');
+
+    // Create download link
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+
+    // Get filename from response headers
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = `rumormx_export.${format}`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+      if (filenameMatch) {
+        filename = filenameMatch[1];
+      }
+    }
+
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    // Show success message
+    alert(`Datos exportados exitosamente como ${format.toUpperCase()}`);
+  } catch (error) {
+    console.error('Export error:', error);
+    alert('Error al exportar los datos. Inténtalo de nuevo.');
+  }
+}
+
+// Initialize export buttons when DOM is ready
+document.addEventListener('DOMContentLoaded', setupExportButtons);

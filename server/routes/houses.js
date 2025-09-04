@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("../config/database");
 const crypto = require("crypto");
+const cacheManager = require("../cache");
 
 // Reacciones permitidas para comentarios
 const ALLOWED_REACTIONS = new Set([
@@ -24,24 +25,8 @@ const ALLOWED_EMOJIS = {
   FAL: "🎭",
 };
 
-// Simple in-memory cache with TTL to reduce DB pressure on repeated viewport queries
-const CACHE_TTL_MS = 15000; // 15s
-const simpleCache = new Map();
-function getCached(key) {
-  const entry = simpleCache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.t > CACHE_TTL_MS) {
-    simpleCache.delete(key);
-    return null;
-  }
-  return entry.v;
-}
-function setCached(key, value) {
-  simpleCache.set(key, { v: value, t: Date.now() });
-}
-
 // Obtener viviendas con estrategia de carga mejorada (bounds + limit + cache)
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const { north, south, east, west } = req.query;
   const limit = Math.min(parseInt(req.query.limit, 10) || 300, 1000);
 
@@ -52,9 +37,9 @@ router.get("/", (req, res) => {
   let params = [];
 
   if (hasBounds) {
-    // Filtrar por viewport y limitar resultados
+    // Filtrar por viewport y limitar resultados - solo campos básicos para rendimiento
     query = `
-      SELECT *
+      SELECT id, address, lat, lng, created_at
       FROM houses
       WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
       ORDER BY created_at DESC
@@ -64,7 +49,7 @@ router.get("/", (req, res) => {
   } else {
     // Fallback: limitar siempre si no hay bounds (evita traer toda la BD)
     query = `
-      SELECT *
+      SELECT id, address, lat, lng, created_at
       FROM houses
       ORDER BY created_at DESC
       LIMIT ?
@@ -72,22 +57,85 @@ router.get("/", (req, res) => {
     params = [limit];
   }
 
-  const cacheKey = `houses:${hasBounds ? `${south},${north},${west},${east}` : "no-bounds"}:${limit}`;
-  const cached = getCached(cacheKey);
-  if (cached) {
-    res.setHeader("Cache-Control", "public, max-age=15");
-    return res.json(cached);
-  }
+  // Use Redis cache for better performance
+  const fetchFromDB = () => {
+    return new Promise((resolve, reject) => {
+      db.query(query, params, (err, results) => {
+        if (err) {
+          console.error("Error obteniendo viviendas:", err);
+          reject(err);
+        } else {
+          resolve(results);
+        }
+      });
+    });
+  };
 
-  db.query(query, params, (err, results) => {
-    if (err) {
-      console.error("Error obteniendo viviendas:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
-    }
-    setCached(cacheKey, results);
-    res.setHeader("Cache-Control", "public, max-age=15");
+  try {
+    const results = await cacheManager.getOrSet(
+      `houses-basic:${hasBounds ? `${south},${north},${west},${east}` : "no-bounds"}:${limit}`,
+      fetchFromDB,
+      300 // 5 minutes TTL
+    );
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
     res.json(results);
-  });
+  } catch (err) {
+    console.error("Error obteniendo viviendas:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
+// Obtener detalles completos de una vivienda específica
+router.get("/:id/details", async (req, res) => {
+  const id = parseInt(req.params.id);
+
+  const fetchDetailedHouse = () => {
+    return new Promise((resolve, reject) => {
+      const query = `
+        SELECT h.*,
+               COALESCE(rc.reaction_count, 0) AS reaction_count,
+               (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count
+        FROM houses h
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS reaction_count
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL
+          GROUP BY house_id
+        ) rc ON rc.house_id = h.id
+        WHERE h.id = ?
+      `;
+
+      db.query(query, [id], (err, results) => {
+        if (err) {
+          console.error("Error obteniendo detalles de vivienda:", err);
+          reject(err);
+        } else {
+          resolve(results[0] || null);
+        }
+      });
+    });
+  };
+
+  try {
+    const house = await cacheManager.getOrSet(
+      `house-details:${id}`,
+      fetchDetailedHouse,
+      600 // 10 minutes TTL for detailed data
+    );
+
+    if (!house) {
+      return res.status(404).json({ error: "Vivienda no encontrada" });
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=600");
+    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
+    res.json(house);
+  } catch (err) {
+    console.error("Error obteniendo detalles de vivienda:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
 
 // Crear una nueva vivienda
@@ -106,6 +154,10 @@ router.post("/", (req, res) => {
       console.error("Error creando vivienda:", err);
       return res.status(500).json({ error: "Error interno del servidor" });
     }
+
+    // Clear cache for houses and top houses
+    cacheManager.clearHousesCache();
+    cacheManager.del('top-houses:*');
 
     // Obtener la vivienda recién creada
     const selectQuery = "SELECT * FROM houses WHERE id = ?";
@@ -136,6 +188,10 @@ router.put("/:id", (req, res) => {
     if (results.affectedRows === 0) {
       return res.status(404).json({ error: "Vivienda no encontrada" });
     }
+
+    // Clear cache for houses and top houses
+    cacheManager.clearHousesCache();
+    cacheManager.del('top-houses:*');
 
     // Obtener la vivienda actualizada
     const selectQuery = "SELECT * FROM houses WHERE id = ?";
@@ -527,59 +583,80 @@ router.delete("/:id/reactions", (req, res) => {
 });
 
 // Top houses with improved algorithm (time-weighted engagement)
-router.get("/top", (req, res) => {
+router.get("/top", async (req, res) => {
   const limit = parseInt(req.query.limit, 10) || 10;
-  const q = `
-    SELECT h.*,
-           COALESCE(rc.reaction_count, 0) AS reaction_count,
-           (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count,
-           (
-             -- Base score: reactions + comments * 2
-             COALESCE(rc.reaction_count, 0) +
-             (SELECT COUNT(*) FROM comments WHERE house_id = h.id) * 2 +
-             -- Recency bonus: recent activity (last 7 days) * 1.5
-             COALESCE(rc_recent.recent_reactions, 0) * 1.5 +
-             (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) * 3 +
-             -- Super recency bonus: last 24 hours * 2
-             COALESCE(rc_today.recent_reactions, 0) * 2 +
-             (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) * 4
-           ) * EXP(-DATEDIFF(NOW(), h.created_at) * 0.02) AS engagement_score
-    FROM houses h
-    LEFT JOIN (
-      SELECT house_id, COUNT(*) AS reaction_count
-      FROM comment_reactions
-      WHERE house_id IS NOT NULL
-      GROUP BY house_id
-    ) rc ON rc.house_id = h.id
-    LEFT JOIN (
-      SELECT house_id, COUNT(*) AS recent_reactions
-      FROM comment_reactions
-      WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-      GROUP BY house_id
-    ) rc_recent ON rc_recent.house_id = h.id
-    LEFT JOIN (
-      SELECT house_id, COUNT(*) AS recent_reactions
-      FROM comment_reactions
-      WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
-      GROUP BY house_id
-    ) rc_today ON rc_today.house_id = h.id
-    ORDER BY (engagement_score * (1 + (RAND(UNIX_TIMESTAMP(CURDATE())) * 0.6 - 0.3))) DESC, h.created_at DESC
-    LIMIT ?
-  `;
 
-  db.query(q, [limit], (err, rows) => {
-    if (err) {
-      console.error("Error obteniendo top de viviendas:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
-    }
-    res.json(rows);
-  });
+  const fetchTopHousesFromDB = () => {
+    return new Promise((resolve, reject) => {
+      const q = `
+        SELECT h.*,
+               COALESCE(rc.reaction_count, 0) AS reaction_count,
+               (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count,
+               (
+                 -- Base score: reactions + comments * 2
+                 COALESCE(rc.reaction_count, 0) +
+                 (SELECT COUNT(*) FROM comments WHERE house_id = h.id) * 2 +
+                 -- Recency bonus: recent activity (last 7 days) * 1.5
+                 COALESCE(rc_recent.recent_reactions, 0) * 1.5 +
+                 (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) * 3 +
+                 -- Super recency bonus: last 24 hours * 2
+                 COALESCE(rc_today.recent_reactions, 0) * 2 +
+                 (SELECT COUNT(*) FROM comments WHERE house_id = h.id AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) * 4
+               ) * EXP(-DATEDIFF(NOW(), h.created_at) * 0.02) AS engagement_score
+        FROM houses h
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS reaction_count
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL
+          GROUP BY house_id
+        ) rc ON rc.house_id = h.id
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS recent_reactions
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+          GROUP BY house_id
+        ) rc_recent ON rc_recent.house_id = h.id
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS recent_reactions
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+          GROUP BY house_id
+        ) rc_today ON rc_today.house_id = h.id
+        ORDER BY (engagement_score * (1 + (RAND(UNIX_TIMESTAMP(CURDATE())) * 0.6 - 0.3))) DESC, h.created_at DESC
+        LIMIT ?
+      `;
+
+      db.query(q, [limit], (err, rows) => {
+        if (err) {
+          console.error("Error obteniendo top de viviendas:", err);
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      });
+    });
+  };
+
+  try {
+    const results = await cacheManager.getOrSet(
+      `top-houses:${limit}`,
+      fetchTopHousesFromDB,
+      300 // 5 minutes TTL
+    );
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
+    res.json(results);
+  } catch (err) {
+    console.error("Error obteniendo top de viviendas:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
 
 // -------- Emoji Routes --------
 
 // Obtener emojis en un área específica (bounds + limit + cache)
-router.get("/emojis", (req, res) => {
+router.get("/emojis", async (req, res) => {
   const { north, south, east, west } = req.query;
   const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
 
@@ -587,37 +664,49 @@ router.get("/emojis", (req, res) => {
     return res.status(400).json({ error: "Faltan parámetros de límites" });
   }
 
-  const cacheKey = `emojis:${south},${north},${west},${east}:${limit}`;
-  const cached = getCached(cacheKey);
-  if (cached) {
-    res.setHeader("Cache-Control", "public, max-age=15");
-    return res.json(cached);
-  }
+  const fetchEmojisFromDB = () => {
+    return new Promise((resolve, reject) => {
+      const query = `
+        SELECT id, lat, lng, emoji, emoji_type, created_at
+        FROM location_emojis
+        WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `;
 
-  const query = `
-    SELECT id, lat, lng, emoji, emoji_type, created_at
-    FROM location_emojis
-    WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
-    ORDER BY created_at DESC
-    LIMIT ?
-  `;
+      db.query(query, [south, north, west, east, limit], (err, results) => {
+        if (err) {
+          // Si la tabla no existe, devolver array vacío
+          if (err.code === "ER_NO_SUCH_TABLE") {
+            console.log(
+              "Tabla location_emojis no existe aún, devolviendo array vacío"
+            );
+            resolve([]);
+            return;
+          }
+          console.error("Error obteniendo emojis:", err);
+          reject(err);
+        } else {
+          resolve(results);
+        }
+      });
+    });
+  };
 
-  db.query(query, [south, north, west, east, limit], (err, results) => {
-    if (err) {
-      // Si la tabla no existe, devolver array vacío
-      if (err.code === "ER_NO_SUCH_TABLE") {
-        console.log(
-          "Tabla location_emojis no existe aún, devolviendo array vacío"
-        );
-        return res.json([]);
-      }
-      console.error("Error obteniendo emojis:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
-    }
-    setCached(cacheKey, results);
-    res.setHeader("Cache-Control", "public, max-age=15");
+  try {
+    const results = await cacheManager.getOrSet(
+      `emojis:${south},${north},${west},${east}:${limit}`,
+      fetchEmojisFromDB,
+      180 // 3 minutes TTL
+    );
+
+    res.setHeader("Cache-Control", "public, max-age=180");
+    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
     res.json(results);
-  });
+  } catch (err) {
+    console.error("Error obteniendo emojis:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
 
 // Colocar un emoji en una ubicación
@@ -690,6 +779,9 @@ router.post("/emojis", (req, res) => {
           return res.status(500).json({ error: "Error interno del servidor" });
         }
 
+        // Clear emoji cache
+        cacheManager.clearEmojisCache();
+
         const payload = {
           id: results.insertId,
           lat,
@@ -738,6 +830,91 @@ router.get("/emojis/daily-count", (req, res) => {
       remaining: Math.max(0, 5 - results[0].count),
     });
   });
+});
+
+// Export all houses data as CSV or JSON
+router.get("/export", async (req, res) => {
+  const format = req.query.format || 'json'; // 'json' or 'csv'
+  const limit = parseInt(req.query.limit, 10) || 10000; // Default limit for safety
+
+  const fetchAllHouses = () => {
+    return new Promise((resolve, reject) => {
+      const query = `
+        SELECT
+          h.id,
+          h.address,
+          h.description,
+          h.lat,
+          h.lng,
+          h.created_at,
+          h.updated_at,
+          COALESCE(rc.reaction_count, 0) AS total_reactions,
+          (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS total_comments
+        FROM houses h
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS reaction_count
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL
+          GROUP BY house_id
+        ) rc ON rc.house_id = h.id
+        ORDER BY h.created_at DESC
+        LIMIT ?
+      `;
+
+      db.query(query, [limit], (err, results) => {
+        if (err) {
+          console.error("Error obteniendo datos para exportación:", err);
+          reject(err);
+        } else {
+          resolve(results);
+        }
+      });
+    });
+  };
+
+  try {
+    const houses = await cacheManager.getOrSet(
+      `export-houses-${limit}`,
+      fetchAllHouses,
+      3600 // 1 hour TTL for export data
+    );
+
+    if (format === 'csv') {
+      // Generate CSV
+      const csvHeaders = ['ID', 'Dirección', 'Descripción', 'Latitud', 'Longitud', 'Fecha Creación', 'Fecha Actualización', 'Total Reacciones', 'Total Comentarios'];
+      const csvRows = houses.map(house => [
+        house.id,
+        `"${(house.address || '').replace(/"/g, '""')}"`,
+        `"${(house.description || '').replace(/"/g, '""')}"`,
+        house.lat,
+        house.lng,
+        house.created_at,
+        house.updated_at || '',
+        house.total_reactions,
+        house.total_comments
+      ]);
+
+      const csvContent = [csvHeaders, ...csvRows]
+        .map(row => row.join(','))
+        .join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="rumormx_houses_${new Date().toISOString().split('T')[0]}.csv"`);
+      res.send('\ufeff' + csvContent); // UTF-8 BOM for Excel compatibility
+    } else {
+      // JSON format
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="rumormx_houses_${new Date().toISOString().split('T')[0]}.json"`);
+      res.json({
+        export_date: new Date().toISOString(),
+        total_records: houses.length,
+        data: houses
+      });
+    }
+  } catch (err) {
+    console.error("Error en exportación:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
 
 module.exports = router;

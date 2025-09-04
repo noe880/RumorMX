@@ -677,3 +677,72 @@ body {
 .emoji-marker:hover {
   transform: scale(1.1);
 }
+
+/* ======================
+   Export Section
+   ====================== */
+.export-section {
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.export-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.export-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.export-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.export-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.export-btn:active {
+  transform: scale(0.98);
+}
+
+.export-btn i {
+  font-size: 11px;
+}
+
+/* Responsive adjustments for export buttons */
+@media (max-width: 768px) {
+  .export-section {
+    padding: 10px 12px;
+  }
+
+  .export-title {
+    font-size: 13px;
+  }
+
+  .export-btn {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+}
