@@ -1,4 +1,4 @@
-const redis = require('redis');
+import { createClient } from 'redis';
 
 // Usa la URL completa de Redis
 const redisClient = redis.createClient({
