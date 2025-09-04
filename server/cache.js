@@ -1,4 +1,4 @@
-import { createClient } from 'redis';
+const redis = require('redis');
 
 // Usa la URL completa de Redis
 const redisClient = redis.createClient({
@@ -24,7 +24,14 @@ const redisClient = redis.createClient({
 redisClient.on('error', (err) => console.error('Redis Client Error', err));
 redisClient.on('connect', () => console.log('✅ Connected to Redis'));
 
-await redisClient.connect(); // Importante en versiones recientes de redis
+(async () => {
+  try {
+    await redisClient.connect();
+    console.log('✅ Redis client connected');
+  } catch (err) {
+    console.warn('⚠️ Redis connection failed, falling back to in-memory cache:', err.message);
+  }
+})();// Importante en versiones recientes de redis
 
 // Handle Redis connection events
 redisClient.on('error', (err) => {
