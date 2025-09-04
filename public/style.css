@@ -75,22 +75,22 @@ body {
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
   transition: all 0.3s ease;
   opacity: 0;
-  transform: scale(0.8) translateY(-10px);
+  transform: none;
 }
 
 .load-houses-button.show {
   opacity: 1;
-  transform: scale(1) translateY(0);
+  transform: none;
 }
 
 .load-houses-button:hover {
   background: #1d4ed8;
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
-  transform: scale(1.05) translateY(-10px);
+  transform: none;
 }
 
 .load-houses-button:active {
-  transform: scale(0.95) translateY(-10px);
+  transform: none;
 }
 
 .load-houses-button.loading {

@@ -1439,12 +1439,20 @@ async function loadHousesManually() {
       limit: String(limit),
     });
 
-    const response = await retryFetch(`/api/houses?${params}`);
-    const houses = await response.json();
+    // Load houses and emojis simultaneously
+    const [housesResponse, emojisResponse] = await Promise.all([
+      retryFetch(`/api/houses?${params}`),
+      retryFetch(`/api/houses/emojis?${params}`),
+    ]);
+
+    const houses = await housesResponse.json();
+    const emojis = await emojisResponse.json();
 
     // Index existing markers by id to avoid duplicates
     const existingMarkers = new Map(markers.map((m) => [m.id, m]));
+    const existingEmojis = new Map(emojiMarkers.map((m) => [m.id, m]));
     let newMarkersAdded = 0;
+    let newEmojisAdded = 0;
 
     // Process houses and create markers (only add new ones)
     houses.forEach((house) => {
@@ -1461,6 +1469,24 @@ async function loadHousesManually() {
       }
     });
 
+    // Process emojis and create markers (only add new ones)
+    emojis.forEach((emoji) => {
+      if (!existingEmojis.has(emoji.id)) {
+        const position = {
+          lat: parseFloat(emoji.lat),
+          lng: parseFloat(emoji.lng),
+        };
+        const emojiMarker = createEmojiMarker(
+          position,
+          emoji.emoji,
+          emoji.emoji_type,
+          emoji.id
+        );
+        emojiMarkers.push(emojiMarker);
+        newEmojisAdded++;
+      }
+    });
+
     // Only apply clustering if new markers were added
     if (newMarkersAdded > 0) {
       applyClustering();
@@ -1468,18 +1494,25 @@ async function loadHousesManually() {
       updateClusterVisibility();
     }
 
+    // Update emoji visibility if new emojis were added
+    if (newEmojisAdded > 0) {
+      updateEmojiVisibility();
+    }
+
     // Keep the button visible for loading more areas
     // Don't hide it after successful loading
 
-    if (newMarkersAdded === 0) {
-      // Show message if no new houses were found
-      console.log("No se encontraron nuevas notas en esta área");
-    } else {
-      console.log(`Se agregaron ${newMarkersAdded} nuevas notas`);
+    console.log(
+      `Se agregaron ${newMarkersAdded} nuevas notas y ${newEmojisAdded} nuevos emojis`
+    );
+
+    if (newMarkersAdded === 0 && newEmojisAdded === 0) {
+      // Show message if no new content was found
+      console.log("No se encontraron nuevas notas ni emojis en esta área");
     }
   } catch (error) {
-    console.error("Error loading houses manually:", error);
-    alert("Error al cargar las notas. Inténtalo de nuevo.");
+    console.error("Error loading houses and emojis manually:", error);
+    alert("Error al cargar las notas y emojis. Inténtalo de nuevo.");
   } finally {
     isLoadingHouses = false;
     loadHousesButton.classList.remove("loading");
