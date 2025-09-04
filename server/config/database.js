@@ -13,6 +13,10 @@ const pool = mysql.createPool({
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
+  // Add timeouts for cloud database connections
+  acquireTimeout: 60000, // 60 seconds to acquire connection
+  timeout: 60000, // 60 seconds query timeout
+  connectTimeout: 30000, // 30 seconds connection timeout
 });
 
 // Probar conexión inicial (opcional)

@@ -477,7 +477,7 @@ async function openDetail(marker, shouldCenter = true) {
     console.log("Fetching details for marker ID:", marker.id);
     // Fetch detailed data with timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for cloud database
 
     const response = await fetch(`/api/houses/${marker.id}/details`, {
       signal: controller.signal,

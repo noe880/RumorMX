@@ -11,6 +11,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Add timeout middleware to prevent hanging requests
+app.use((req, res, next) => {
+  // Set timeout to 45 seconds (longer than frontend timeout)
+  req.setTimeout(45000);
+  res.setTimeout(45000);
+  next();
+});
+
 // Handle JSON parsing errors
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {

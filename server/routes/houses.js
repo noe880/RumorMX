@@ -130,13 +130,11 @@ router.get("/:id/details", async (req, res) => {
 
   try {
     console.log(`Fetching details for house ID: ${id}`);
-    // Temporarily disable caching to test
-    const house = await fetchDetailedHouse();
-    // const house = await cacheManager.getOrSet(
-    //   `house-details:${id}`,
-    //   fetchDetailedHouse,
-    //   600 // 10 minutes TTL for detailed data
-    // );
+    const house = await cacheManager.getOrSet(
+      `house-details:${id}`,
+      fetchDetailedHouse,
+      600 // 10 minutes TTL for detailed data
+    );
 
     console.log(`House details result:`, house);
     if (!house) {
