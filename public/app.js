@@ -474,11 +474,27 @@ async function openDetail(marker, shouldCenter = true) {
   if (!marker.id) return;
 
   try {
-    // Fetch detailed data
-    const response = await fetch(`/api/houses/${marker.id}/details`);
-    if (!response.ok) throw new Error("Failed to load house details");
+    console.log("Fetching details for marker ID:", marker.id);
+    // Fetch detailed data with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    const response = await fetch(`/api/houses/${marker.id}/details`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    console.log("Response status:", response.status);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Response error:", errorText);
+      throw new Error(
+        `Failed to load house details: ${response.status} ${errorText}`
+      );
+    }
 
     const houseDetails = await response.json();
+    console.log("House details received:", houseDetails);
 
     // Update marker with full data
     marker.description = houseDetails.description;
@@ -588,9 +604,13 @@ async function openDetail(marker, shouldCenter = true) {
     loadComments();
   } catch (error) {
     console.error("Error loading house details:", error);
+    let errorMessage = "Error al cargar los detalles";
+    if (error.name === "AbortError") {
+      errorMessage = "Tiempo de espera agotado al cargar los detalles";
+    }
     content.innerHTML = `
       <div class="title">${escapeHtml(marker.address || "Sin dirección")}</div>
-      <div class="desc" style="color:#ef4444;">Error al cargar los detalles</div>
+      <div class="desc" style="color:#ef4444;">${errorMessage}</div>
     `;
   }
 }

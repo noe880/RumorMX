@@ -98,28 +98,30 @@ router.get("/", async (req, res) => {
 // Obtener detalles completos de una vivienda específica
 router.get("/:id/details", async (req, res) => {
   const id = parseInt(req.params.id);
+  console.log(`Details request for ID: ${req.params.id}, parsed ID: ${id}`);
+
+  if (isNaN(id) || id <= 0) {
+    console.log(`Invalid house ID: ${req.params.id}`);
+    return res.status(400).json({ error: "ID de vivienda inválido" });
+  }
 
   const fetchDetailedHouse = () => {
     return new Promise((resolve, reject) => {
       const query = `
         SELECT h.*,
-               COALESCE(rc.reaction_count, 0) AS reaction_count,
-               (SELECT COUNT(*) FROM comments WHERE house_id = h.id) AS comment_count
+               0 AS reaction_count,
+               0 AS comment_count
         FROM houses h
-        LEFT JOIN (
-          SELECT house_id, COUNT(*) AS reaction_count
-          FROM comment_reactions
-          WHERE house_id IS NOT NULL
-          GROUP BY house_id
-        ) rc ON rc.house_id = h.id
         WHERE h.id = ?
       `;
 
+      console.log(`Executing query for house ID ${id}:`, query);
       db.query(query, [id], (err, results) => {
         if (err) {
           console.error("Error obteniendo detalles de vivienda:", err);
           reject(err);
         } else {
+          console.log(`Query results for house ID ${id}:`, results);
           resolve(results[0] || null);
         }
       });
@@ -127,13 +129,18 @@ router.get("/:id/details", async (req, res) => {
   };
 
   try {
-    const house = await cacheManager.getOrSet(
-      `house-details:${id}`,
-      fetchDetailedHouse,
-      600 // 10 minutes TTL for detailed data
-    );
+    console.log(`Fetching details for house ID: ${id}`);
+    // Temporarily disable caching to test
+    const house = await fetchDetailedHouse();
+    // const house = await cacheManager.getOrSet(
+    //   `house-details:${id}`,
+    //   fetchDetailedHouse,
+    //   600 // 10 minutes TTL for detailed data
+    // );
 
+    console.log(`House details result:`, house);
     if (!house) {
+      console.log(`House with ID ${id} not found`);
       return res.status(404).json({ error: "Vivienda no encontrada" });
     }
 
