@@ -55,6 +55,98 @@ body {
   background: rgb(255, 255, 255);
 }
 
+/* Botón flotante del ojo para cargar notas */
+.load-houses-button {
+  position: fixed;
+  top: 72px; /* Mejor separación del botón de menú */
+  left: 12px; /* Misma posición horizontal que el botón de menú */
+  z-index: 15;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 42px; /* Ligeramente más grande */
+  height: 42px; /* Ligeramente más grande */
+  font-size: 16px; /* Tamaño de ícono apropiado */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  transition: all 0.3s ease;
+  opacity: 0;
+  transform: scale(0.8) translateY(-10px);
+}
+
+.load-houses-button.show {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.load-houses-button:hover {
+  background: #1d4ed8;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+  transform: scale(1.05) translateY(-10px);
+}
+
+.load-houses-button:active {
+  transform: scale(0.95) translateY(-10px);
+}
+
+.load-houses-button.loading {
+  background: #6b7280;
+  cursor: not-allowed;
+}
+
+.load-houses-button.loading::after {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border: 2px solid #ffffff;
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  position: absolute;
+}
+
+.load-houses-button i {
+  transition: transform 0.2s ease;
+}
+
+.load-houses-button:hover i {
+  transform: scale(1.1);
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive para el botón del ojo */
+@media (max-width: 768px) {
+  .load-houses-button {
+    top: 75px; /* Más separación del botón de menú */
+    left: 15px;
+    width: 48px; /* Más grande en tablets */
+    height: 48px;
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .load-houses-button {
+    top: 70px; /* Buena separación en móviles */
+    left: 12px;
+    width: 44px; /* Más grande en móviles pequeños */
+    height: 44px;
+    font-size: 16px;
+  }
+}
+
 .side-panel {
   position: fixed;
   top: 0;

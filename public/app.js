@@ -4,6 +4,9 @@ let emojiMarkers = [];
 let clusterMarkers = [];
 let popup;
 let currentDetailMarker = null;
+let loadHousesButton = null;
+let isLoadingHouses = false;
+let lastLoadedBounds = null;
 
 // Limites aproximados de México (para restringir el viewport)
 const MEXICO_BOUNDS = {
@@ -27,6 +30,88 @@ function debounce(fn, wait) {
   };
 }
 
+// Retry helper with exponential backoff
+async function retryFetch(
+  url,
+  options = {},
+  maxRetries = 3,
+  baseDelay = 1000,
+  onProgress = null
+) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (onProgress) {
+        onProgress(attempt + 1, maxRetries + 1, "connecting");
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
+
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      if (onProgress) {
+        onProgress(attempt + 1, maxRetries + 1, "success");
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      if (error.name === "AbortError") {
+        console.warn(
+          `Request timeout on attempt ${attempt + 1}/${
+            maxRetries + 1
+          } for ${url}`
+        );
+        if (onProgress) {
+          onProgress(attempt + 1, maxRetries + 1, "timeout");
+        }
+      } else {
+        console.warn(
+          `Request failed on attempt ${attempt + 1}/${
+            maxRetries + 1
+          } for ${url}:`,
+          error.message
+        );
+        if (onProgress) {
+          onProgress(attempt + 1, maxRetries + 1, "error");
+        }
+      }
+
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000; // Exponential backoff with jitter
+        console.log(`Retrying in ${Math.round(delay)}ms...`);
+        if (onProgress) {
+          onProgress(
+            attempt + 1,
+            maxRetries + 1,
+            "retrying",
+            Math.round(delay)
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  if (onProgress) {
+    onProgress(maxRetries + 1, maxRetries + 1, "failed");
+  }
+
+  throw lastError;
+}
+
 async function initMap() {
   const center = { lat: 23.6345, lng: -102.5528 };
 
@@ -36,6 +121,9 @@ async function initMap() {
     return;
   }
   mapboxgl.accessToken = token;
+
+  // Inicializar botón del ojo
+  loadHousesButton = document.getElementById("load-houses-button");
 
   // Crear mapa full-screen con límites de México
   map = new mapboxgl.Map({
@@ -60,19 +148,23 @@ async function initMap() {
   });
 
   map.on("load", async () => {
-    await loadHouses();
+    // Inicializar botón del ojo
+    setupLoadHousesButton();
+
+    // No cargar casas automáticamente, solo emojis
     await loadEmojis();
     preloadTopNotes();
 
     updateMarkersVisibility();
     updateEmojiVisibility();
+    updateClusterVisibility();
 
     const refresh = debounce(async () => {
-      await loadHouses();
-      await loadEmojis();
+      // Solo actualizar visibilidad, no cargar casas automáticamente
       updateMarkersVisibility();
       updateEmojiVisibility();
-      applyClustering();
+      updateClusterVisibility();
+      updateLoadHousesButtonVisibility();
     }, 300);
 
     map.on("moveend", refresh);
@@ -475,24 +567,10 @@ async function openDetail(marker, shouldCenter = true) {
 
   try {
     console.log("Fetching details for marker ID:", marker.id);
-    // Fetch detailed data with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for cloud database
-
-    const response = await fetch(`/api/houses/${marker.id}/details`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    // Fetch detailed data with retry mechanism
+    const response = await retryFetch(`/api/houses/${marker.id}/details`);
 
     console.log("Response status:", response.status);
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Response error:", errorText);
-      throw new Error(
-        `Failed to load house details: ${response.status} ${errorText}`
-      );
-    }
-
     const houseDetails = await response.json();
     console.log("House details received:", houseDetails);
 
@@ -569,14 +647,15 @@ async function openDetail(marker, shouldCenter = true) {
       try {
         listEl.innerHTML =
           '<div style="color:#6b7280;font-size:13px;">Cargando comentarios...</div>';
-        const resp = await fetch(`/api/houses/${marker.id}/comments`);
-        if (!resp.ok) throw new Error(await resp.text());
+        const resp = await retryFetch(`/api/houses/${marker.id}/comments`);
         const data = await resp.json();
         renderComments(data);
       } catch (e) {
         console.error("Error cargando comentarios:", e);
         listEl.innerHTML =
-          '<div style="color:#ef4444;font-size:13px;">No se pudieron cargar los comentarios</div>';
+          '<div style="color:#ef4444;font-size:13px;">No se pudieron cargar los comentarios. Reintentando...</div>';
+        // Auto-retry once after a delay
+        setTimeout(() => loadComments(), 2000);
       }
     };
 
@@ -585,17 +664,16 @@ async function openDetail(marker, shouldCenter = true) {
       if (!txt) return;
       try {
         submitEl.disabled = true;
-        const resp = await fetch(`/api/houses/${marker.id}/comments`, {
+        const resp = await retryFetch(`/api/houses/${marker.id}/comments`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ comment: txt }),
         });
-        if (!resp.ok) throw new Error(await resp.text());
         inputEl.value = "";
         await loadComments();
       } catch (e) {
         console.error("Error enviando comentario:", e);
-        alert("No se pudo enviar el comentario");
+        alert("No se pudo enviar el comentario. Reinténtalo.");
       } finally {
         submitEl.disabled = false;
       }
@@ -617,13 +695,18 @@ async function openDetail(marker, shouldCenter = true) {
 
 async function loadHouseReactions(houseId, content) {
   try {
-    const resp = await fetch(`/api/houses/${houseId}/reactions`);
-    if (!resp.ok) throw new Error(await resp.text());
+    const resp = await retryFetch(`/api/houses/${houseId}/reactions`);
     const data = await resp.json();
 
     renderHouseReactions(data, content, houseId);
   } catch (e) {
     console.error("Error cargando reacciones de casa:", e);
+    // Show error state in reactions section
+    const reactionsContainer = content.querySelector(".house-reactions");
+    if (reactionsContainer) {
+      reactionsContainer.innerHTML =
+        '<div style="color:#ef4444;font-size:12px;">Error cargando reacciones</div>';
+    }
   }
 }
 
@@ -669,18 +752,17 @@ function renderHouseReactions(data, content, houseId) {
         let resp;
         if (data.user_reaction === reaction) {
           // toggle off -> DELETE
-          resp = await fetch(`/api/houses/${houseId}/reactions`, {
+          resp = await retryFetch(`/api/houses/${houseId}/reactions`, {
             method: "DELETE",
           });
         } else {
           // set/update -> POST
-          resp = await fetch(`/api/houses/${houseId}/reactions`, {
+          resp = await retryFetch(`/api/houses/${houseId}/reactions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reaction }),
           });
         }
-        if (!resp.ok) throw new Error(await resp.text());
         const newData = await resp.json();
 
         // Update local state and re-render
@@ -690,7 +772,7 @@ function renderHouseReactions(data, content, houseId) {
         renderHouseReactions(data, content, houseId);
       } catch (e) {
         console.error("Error al reaccionar:", e);
-        alert("No se pudo registrar la reacción");
+        alert("No se pudo registrar la reacción. Reinténtalo.");
       } finally {
         btn.disabled = false;
       }
@@ -754,7 +836,7 @@ function openCreateForm(position) {
       const emojiType = btn.getAttribute("data-type");
       try {
         btn.disabled = true;
-        const resp = await fetch("/api/houses/emojis", {
+        const resp = await retryFetch("/api/houses/emojis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -817,7 +899,7 @@ function openCreateForm(position) {
         lng: position.lng,
       };
 
-      const resp = await fetch("/api/houses", {
+      const resp = await retryFetch("/api/houses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(houseData),
@@ -842,7 +924,7 @@ function openCreateForm(position) {
 
 async function updateEmojiStatus(content) {
   try {
-    const resp = await fetch("/api/houses/emojis/daily-count");
+    const resp = await retryFetch("/api/houses/emojis/daily-count");
     const data = await resp.json();
 
     const statusEl = content.querySelector(".emoji-status");
@@ -916,7 +998,7 @@ function openEditForm(marker) {
     if (!address || !description) return;
 
     try {
-      const resp = await fetch(`/api/houses/${marker.id}`, {
+      const resp = await retryFetch(`/api/houses/${marker.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address, description }),
@@ -937,7 +1019,7 @@ async function deleteHouse(id) {
   if (!confirm("¿Eliminar esta nota?")) return;
 
   try {
-    const resp = await fetch(`/api/houses/${id}`, { method: "DELETE" });
+    const resp = await retryFetch(`/api/houses/${id}`, { method: "DELETE" });
     if (!resp.ok) throw new Error(await resp.text());
 
     const idx = markers.findIndex((m) => m.id === id);
@@ -1063,13 +1145,33 @@ function updateEmojiVisibility() {
   });
 }
 
+// Actualiza visibilidad de clusters según distancia al centro del mapa
+function updateClusterVisibility() {
+  if (!map) return;
+  const center = map.getCenter();
+  const cLat = center.lat;
+  const cLng = center.lng;
+
+  clusterMarkers.forEach((m) => {
+    const dist = haversineMeters(cLat, cLng, m.lat, m.lng);
+    const visible = dist <= PROXIMITY_RADIUS_METERS;
+
+    if (visible && !m._visible) {
+      m.addTo(map);
+      m._visible = true;
+    } else if (!visible && m._visible) {
+      m.remove();
+      m._visible = false;
+    }
+  });
+}
+
 // -------- Top 10 Lógica --------
 let cachedTop = [];
 let topLoadedOnce = false;
 
 async function fetchTopNotes() {
-  const resp = await fetch("/api/houses/top?limit=10");
-  if (!resp.ok) throw new Error(await resp.text());
+  const resp = await retryFetch("/api/houses/top?limit=10");
   const data = await resp.json();
   cachedTop = Array.isArray(data) ? data : [];
   topLoadedOnce = true;
@@ -1197,10 +1299,9 @@ function setupExportButtons() {
 
 async function exportData(format) {
   try {
-    const response = await fetch(
+    const response = await retryFetch(
       `/api/houses/export?format=${format}&limit=10000`
     );
-    if (!response.ok) throw new Error("Export failed");
 
     // Create download link
     const blob = await response.blob();
@@ -1230,6 +1331,158 @@ async function exportData(format) {
   } catch (error) {
     console.error("Export error:", error);
     alert("Error al exportar los datos. Inténtalo de nuevo.");
+  }
+}
+
+// Setup load houses button functionality
+function setupLoadHousesButton() {
+  if (!loadHousesButton) return;
+
+  loadHousesButton.addEventListener("click", async () => {
+    if (isLoadingHouses) return;
+
+    await loadHousesManually();
+  });
+
+  // Initial check for button visibility
+  updateLoadHousesButtonVisibility();
+}
+
+// Check if there are houses nearby and show/hide the button
+async function checkHousesNearby() {
+  try {
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+
+    // Use existing endpoint with limit 1 to check if there are houses
+    const params = new URLSearchParams({
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+      limit: "1", // Just check if there's at least one house
+    });
+
+    const response = await retryFetch(`/api/houses?${params}`, {}, 1, 1000);
+    const houses = await response.json();
+
+    // Check if there are any houses in the area
+    return houses.length > 0;
+  } catch (error) {
+    console.error("Error checking houses nearby:", error);
+    return false;
+  }
+}
+
+// Update load houses button visibility based on proximity and zoom
+async function updateLoadHousesButtonVisibility() {
+  if (!loadHousesButton) return;
+
+  const zoom = map.getZoom();
+
+  // Show button only when user is very close to the map (>= 14), for highly focused area loading
+  if (zoom >= 14) {
+    loadHousesButton.style.display = "flex";
+    loadHousesButton.classList.add("show");
+  } else {
+    loadHousesButton.classList.remove("show");
+    setTimeout(() => {
+      loadHousesButton.style.display = "none";
+    }, 300); // Wait for animation to complete
+  }
+}
+
+// Clear all markers and clusters from the map
+function clearAllMarkers() {
+  // Clear house markers
+  markers.forEach((m) => {
+    try {
+      m.remove();
+    } catch (_) {}
+  });
+  markers = [];
+
+  // Clear cluster markers
+  clusterMarkers.forEach((m) => {
+    try {
+      m.remove();
+    } catch (_) {}
+  });
+  clusterMarkers = [];
+}
+
+// Load houses manually when button is clicked
+async function loadHousesManually() {
+  if (isLoadingHouses) return;
+
+  const zoom = map.getZoom();
+  if (zoom < 14) {
+    alert("Acércate más al mapa para cargar las notas (zoom mínimo: 14)");
+    return;
+  }
+
+  try {
+    isLoadingHouses = true;
+    loadHousesButton.classList.add("loading");
+
+    const bounds = map.getBounds();
+
+    // Calculate limit based on zoom level (same as original loadHouses function)
+    const limit = zoom < 8 ? 150 : zoom < 12 ? 400 : 1000;
+
+    // Use existing houses endpoint
+    const params = new URLSearchParams({
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+      limit: String(limit),
+    });
+
+    const response = await retryFetch(`/api/houses?${params}`);
+    const houses = await response.json();
+
+    // Index existing markers by id to avoid duplicates
+    const existingMarkers = new Map(markers.map((m) => [m.id, m]));
+    let newMarkersAdded = 0;
+
+    // Process houses and create markers (only add new ones)
+    houses.forEach((house) => {
+      if (!existingMarkers.has(house.id)) {
+        const position = { lat: house.lat, lng: house.lng };
+        const marker = createMarker(
+          position,
+          house.address,
+          null, // description será cargada bajo demanda
+          house.id
+        );
+        markers.push(marker);
+        newMarkersAdded++;
+      }
+    });
+
+    // Only apply clustering if new markers were added
+    if (newMarkersAdded > 0) {
+      applyClustering();
+      updateMarkersVisibility();
+      updateClusterVisibility();
+    }
+
+    // Keep the button visible for loading more areas
+    // Don't hide it after successful loading
+
+    if (newMarkersAdded === 0) {
+      // Show message if no new houses were found
+      console.log("No se encontraron nuevas notas en esta área");
+    } else {
+      console.log(`Se agregaron ${newMarkersAdded} nuevas notas`);
+    }
+  } catch (error) {
+    console.error("Error loading houses manually:", error);
+    alert("Error al cargar las notas. Inténtalo de nuevo.");
+  } finally {
+    isLoadingHouses = false;
+    loadHousesButton.classList.remove("loading");
   }
 }
 

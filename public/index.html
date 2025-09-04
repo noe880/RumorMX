@@ -5,11 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RumorMX</title>
     <link rel="stylesheet" href="style.css" />
-    <link href="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+    <link
+      href="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="img/favicon.png" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+    />
   </head>
   <body>
     <div id="map"></div>
@@ -24,6 +30,17 @@
       ⋮
     </button>
 
+    <!-- Botón flotante del ojo para cargar notas (debajo del menú) -->
+    <button
+      id="load-houses-button"
+      class="load-houses-button"
+      title="Cargar notas en esta área (zoom mínimo: 14) - Puedes cargar múltiples áreas"
+      aria-label="Cargar notas cercanas"
+      style="display: none"
+    >
+      <i class="fas fa-eye"></i>
+    </button>
+
     <!-- Panel lateral Top 10 -->
     <aside id="side-panel" class="side-panel" aria-hidden="true">
       <div class="side-header">Top 10 Notas 🔥</div>
@@ -33,7 +50,11 @@
       <div class="export-section">
         <div class="export-title">📊 Exportar Datos</div>
         <div class="export-buttons">
-          <button id="export-json" class="export-btn" title="Descargar como JSON">
+          <button
+            id="export-json"
+            class="export-btn"
+            title="Descargar como JSON"
+          >
             <i class="fas fa-download"></i> JSON
           </button>
           <button id="export-csv" class="export-btn" title="Descargar como CSV">
@@ -67,7 +88,9 @@
     <script src="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
     <script>
       // Define tu token de Mapbox aquí o inyéctalo desde el servidor
-      window.MAPBOX_TOKEN = (window.MAPBOX_TOKEN || "").trim() || "pk.eyJ1Ijoibm9lcmlvczg4MCIsImEiOiJjbWYzYmVtdmcwMXUwMmpvaGU1ajE0eHEyIn0.3KFQ5oxEiGrw-O6kY-4_bg";
+      window.MAPBOX_TOKEN =
+        (window.MAPBOX_TOKEN || "").trim() ||
+        "pk.eyJ1Ijoibm9lcmlvczg4MCIsImEiOiJjbWYzYmVtdmcwMXUwMmpvaGU1ajE0eHEyIn0.3KFQ5oxEiGrw-O6kY-4_bg";
     </script>
 
     <!-- App -->
