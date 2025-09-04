@@ -173,7 +173,7 @@ function createClusterMarker(position, count) {
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(size/2 + 2, size/2 + 2, size/2, 0, 2 * Math.PI);
+  ctx.arc(size / 2 + 2, size / 2 + 2, size / 2, 0, 2 * Math.PI);
   ctx.fill();
   ctx.stroke();
 
@@ -183,7 +183,7 @@ function createClusterMarker(position, count) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const text = count > 99 ? "99+" : count.toString();
-  ctx.fillText(text, size/2 + 2, size/2 + 2);
+  ctx.fillText(text, size / 2 + 2, size / 2 + 2);
 
   const marker = new mapboxgl.Marker({ element: canvas, anchor: "center" })
     .setLngLat([position.lng, position.lat])
@@ -202,7 +202,7 @@ function createClusterMarker(position, count) {
     map.easeTo({
       center: [position.lng, position.lat],
       zoom: Math.min(map.getZoom() + 2, 18),
-      duration: 500
+      duration: 500,
     });
   });
 
@@ -257,7 +257,9 @@ async function loadHouses() {
     for (const m of markers) {
       if (m.id && seen.has(m.id)) keep.push(m);
       else {
-        try { m.remove(); } catch (_) {}
+        try {
+          m.remove();
+        } catch (_) {}
       }
     }
     markers = keep;
@@ -273,13 +275,15 @@ async function loadHouses() {
 
 function applyClustering() {
   // Clear existing cluster markers
-  clusterMarkers.forEach(m => {
-    try { m.remove(); } catch (_) {}
+  clusterMarkers.forEach((m) => {
+    try {
+      m.remove();
+    } catch (_) {}
   });
   clusterMarkers = [];
 
   const zoom = map.getZoom();
-  const visibleMarkers = markers.filter(m => m._visible);
+  const visibleMarkers = markers.filter((m) => m._visible);
 
   // Only cluster if zoom is low and we have many markers
   if (zoom > 12 || visibleMarkers.length < 20) {
@@ -289,8 +293,10 @@ function applyClustering() {
   // Simple clustering: group markers within 0.01 degrees (~1km)
   const clusters = new Map();
 
-  visibleMarkers.forEach(marker => {
-    const key = `${Math.round(marker.lat * 100) / 100}_${Math.round(marker.lng * 100) / 100}`;
+  visibleMarkers.forEach((marker) => {
+    const key = `${Math.round(marker.lat * 100) / 100}_${
+      Math.round(marker.lng * 100) / 100
+    }`;
     if (!clusters.has(key)) {
       clusters.set(key, []);
     }
@@ -301,14 +307,18 @@ function applyClustering() {
   clusters.forEach((groupMarkers, key) => {
     if (groupMarkers.length > 1) {
       // Hide individual markers in this cluster
-      groupMarkers.forEach(m => {
-        try { m.remove(); } catch (_) {}
+      groupMarkers.forEach((m) => {
+        try {
+          m.remove();
+        } catch (_) {}
         m._visible = false;
       });
 
       // Calculate cluster center
-      const centerLat = groupMarkers.reduce((sum, m) => sum + m.lat, 0) / groupMarkers.length;
-      const centerLng = groupMarkers.reduce((sum, m) => sum + m.lng, 0) / groupMarkers.length;
+      const centerLat =
+        groupMarkers.reduce((sum, m) => sum + m.lat, 0) / groupMarkers.length;
+      const centerLng =
+        groupMarkers.reduce((sum, m) => sum + m.lng, 0) / groupMarkers.length;
 
       // Create cluster marker
       const clusterMarker = createClusterMarker(
@@ -326,7 +336,11 @@ async function loadEmojis() {
     const zoom = map.getZoom();
     if (zoom < 6) {
       // Evita cargar emojis con zoom muy bajo
-      emojiMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+      emojiMarkers.forEach((m) => {
+        try {
+          m.remove();
+        } catch (_) {}
+      });
       emojiMarkers = [];
       return;
     }
@@ -359,12 +373,7 @@ async function loadEmojis() {
         m.emojiType = e.emoji_type;
         return;
       }
-      const marker = createEmojiMarker(
-        { lat, lng },
-        e.emoji,
-        e.emoji_type,
-        id
-      );
+      const marker = createEmojiMarker({ lat, lng }, e.emoji, e.emoji_type, id);
       emojiMarkers.push(marker);
     });
 
@@ -372,7 +381,11 @@ async function loadEmojis() {
     const keep = [];
     for (const m of emojiMarkers) {
       if (m.id && seen.has(m.id)) keep.push(m);
-      else { try { m.remove(); } catch (_) {} }
+      else {
+        try {
+          m.remove();
+        } catch (_) {}
+      }
     }
     emojiMarkers = keep;
 
@@ -463,7 +476,7 @@ async function openDetail(marker, shouldCenter = true) {
   try {
     // Fetch detailed data
     const response = await fetch(`/api/houses/${marker.id}/details`);
-    if (!response.ok) throw new Error('Failed to load house details');
+    if (!response.ok) throw new Error("Failed to load house details");
 
     const houseDetails = await response.json();
 
@@ -518,7 +531,9 @@ async function openDetail(marker, shouldCenter = true) {
       comments.forEach((c) => {
         const item = document.createElement("div");
         item.className = "comment-item";
-        const when = c.created_at ? new Date(c.created_at).toLocaleString() : "";
+        const when = c.created_at
+          ? new Date(c.created_at).toLocaleString()
+          : "";
 
         // Build HTML (text + meta only, reactions removed)
         item.innerHTML = `
@@ -921,7 +936,7 @@ async function deleteHouse(id) {
 }
 
 // Configuración de proximidad (en metros)
-const PROXIMITY_RADIUS_METERS = 3000; // 3 km por defecto
+const PROXIMITY_RADIUS_METERS = 10000; // 10 km para mantener notas visibles más tiempo
 
 // Helpers
 function trimText(text, max) {
@@ -1144,36 +1159,38 @@ function preloadTopNotes() {
 
 // Export functionality
 function setupExportButtons() {
-  const exportJsonBtn = document.getElementById('export-json');
-  const exportCsvBtn = document.getElementById('export-csv');
+  const exportJsonBtn = document.getElementById("export-json");
+  const exportCsvBtn = document.getElementById("export-csv");
 
   if (exportJsonBtn) {
-    exportJsonBtn.addEventListener('click', () => {
-      exportData('json');
+    exportJsonBtn.addEventListener("click", () => {
+      exportData("json");
     });
   }
 
   if (exportCsvBtn) {
-    exportCsvBtn.addEventListener('click', () => {
-      exportData('csv');
+    exportCsvBtn.addEventListener("click", () => {
+      exportData("csv");
     });
   }
 }
 
 async function exportData(format) {
   try {
-    const response = await fetch(`/api/houses/export?format=${format}&limit=10000`);
-    if (!response.ok) throw new Error('Export failed');
+    const response = await fetch(
+      `/api/houses/export?format=${format}&limit=10000`
+    );
+    if (!response.ok) throw new Error("Export failed");
 
     // Create download link
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
+    const a = document.createElement("a");
+    a.style.display = "none";
     a.href = url;
 
     // Get filename from response headers
-    const contentDisposition = response.headers.get('Content-Disposition');
+    const contentDisposition = response.headers.get("Content-Disposition");
     let filename = `rumormx_export.${format}`;
     if (contentDisposition) {
       const filenameMatch = contentDisposition.match(/filename="(.+)"/);
@@ -1191,10 +1208,10 @@ async function exportData(format) {
     // Show success message
     alert(`Datos exportados exitosamente como ${format.toUpperCase()}`);
   } catch (error) {
-    console.error('Export error:', error);
-    alert('Error al exportar los datos. Inténtalo de nuevo.');
+    console.error("Export error:", error);
+    alert("Error al exportar los datos. Inténtalo de nuevo.");
   }
 }
 
 // Initialize export buttons when DOM is ready
-document.addEventListener('DOMContentLoaded', setupExportButtons);
+document.addEventListener("DOMContentLoaded", setupExportButtons);

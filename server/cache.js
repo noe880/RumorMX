@@ -55,7 +55,7 @@ redisClient.on("end", () => {
 
 // Cache configuration
 const CACHE_TTL = {
-  HOUSES_BOUNDS: 300, // 5 minutes for viewport queries
+  HOUSES_BOUNDS: 600, // 10 minutes for viewport queries (aumentado para mejor persistencia)
   HOUSES_POPULAR: 600, // 10 minutes for popular areas
   EMOJIS_BOUNDS: 180, // 3 minutes for emoji queries
   TOP_HOUSES: 300, // 5 minutes for top houses

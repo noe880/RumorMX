@@ -31,7 +31,10 @@ router.get("/", async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 300, 1000);
 
   const hasBounds =
-    north !== undefined && south !== undefined && east !== undefined && west !== undefined;
+    north !== undefined &&
+    south !== undefined &&
+    east !== undefined &&
+    west !== undefined;
 
   let query;
   let params = [];
@@ -73,13 +76,18 @@ router.get("/", async (req, res) => {
 
   try {
     const results = await cacheManager.getOrSet(
-      `houses-basic:${hasBounds ? `${south},${north},${west},${east}` : "no-bounds"}:${limit}`,
+      `houses-basic:${
+        hasBounds ? `${south},${north},${west},${east}` : "no-bounds"
+      }:${limit}`,
       fetchFromDB,
-      300 // 5 minutes TTL
+      600 // 10 minutes TTL para mejor persistencia
     );
 
     res.setHeader("Cache-Control", "public, max-age=300");
-    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
     res.json(results);
   } catch (err) {
     console.error("Error obteniendo viviendas:", err);
@@ -130,7 +138,10 @@ router.get("/:id/details", async (req, res) => {
     }
 
     res.setHeader("Cache-Control", "public, max-age=600");
-    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
     res.json(house);
   } catch (err) {
     console.error("Error obteniendo detalles de vivienda:", err);
@@ -157,7 +168,7 @@ router.post("/", (req, res) => {
 
     // Clear cache for houses and top houses
     cacheManager.clearHousesCache();
-    cacheManager.del('top-houses:*');
+    cacheManager.del("top-houses:*");
 
     // Obtener la vivienda recién creada
     const selectQuery = "SELECT * FROM houses WHERE id = ?";
@@ -191,7 +202,7 @@ router.put("/:id", (req, res) => {
 
     // Clear cache for houses and top houses
     cacheManager.clearHousesCache();
-    cacheManager.del('top-houses:*');
+    cacheManager.del("top-houses:*");
 
     // Obtener la vivienda actualizada
     const selectQuery = "SELECT * FROM houses WHERE id = ?";
@@ -645,7 +656,10 @@ router.get("/top", async (req, res) => {
     );
 
     res.setHeader("Cache-Control", "public, max-age=300");
-    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
     res.json(results);
   } catch (err) {
     console.error("Error obteniendo top de viviendas:", err);
@@ -701,7 +715,10 @@ router.get("/emojis", async (req, res) => {
     );
 
     res.setHeader("Cache-Control", "public, max-age=180");
-    res.setHeader("X-Cache-Status", cacheManager.isRedisAvailable() ? "redis" : "memory");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
     res.json(results);
   } catch (err) {
     console.error("Error obteniendo emojis:", err);
@@ -834,7 +851,7 @@ router.get("/emojis/daily-count", (req, res) => {
 
 // Export all houses data as CSV or JSON
 router.get("/export", async (req, res) => {
-  const format = req.query.format || 'json'; // 'json' or 'csv'
+  const format = req.query.format || "json"; // 'json' or 'csv'
   const limit = parseInt(req.query.limit, 10) || 10000; // Default limit for safety
 
   const fetchAllHouses = () => {
@@ -879,36 +896,56 @@ router.get("/export", async (req, res) => {
       3600 // 1 hour TTL for export data
     );
 
-    if (format === 'csv') {
+    if (format === "csv") {
       // Generate CSV
-      const csvHeaders = ['ID', 'Dirección', 'Descripción', 'Latitud', 'Longitud', 'Fecha Creación', 'Fecha Actualización', 'Total Reacciones', 'Total Comentarios'];
-      const csvRows = houses.map(house => [
+      const csvHeaders = [
+        "ID",
+        "Dirección",
+        "Descripción",
+        "Latitud",
+        "Longitud",
+        "Fecha Creación",
+        "Fecha Actualización",
+        "Total Reacciones",
+        "Total Comentarios",
+      ];
+      const csvRows = houses.map((house) => [
         house.id,
-        `"${(house.address || '').replace(/"/g, '""')}"`,
-        `"${(house.description || '').replace(/"/g, '""')}"`,
+        `"${(house.address || "").replace(/"/g, '""')}"`,
+        `"${(house.description || "").replace(/"/g, '""')}"`,
         house.lat,
         house.lng,
         house.created_at,
-        house.updated_at || '',
+        house.updated_at || "",
         house.total_reactions,
-        house.total_comments
+        house.total_comments,
       ]);
 
       const csvContent = [csvHeaders, ...csvRows]
-        .map(row => row.join(','))
-        .join('\n');
+        .map((row) => row.join(","))
+        .join("\n");
 
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="rumormx_houses_${new Date().toISOString().split('T')[0]}.csv"`);
-      res.send('\ufeff' + csvContent); // UTF-8 BOM for Excel compatibility
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="rumormx_houses_${
+          new Date().toISOString().split("T")[0]
+        }.csv"`
+      );
+      res.send("\ufeff" + csvContent); // UTF-8 BOM for Excel compatibility
     } else {
       // JSON format
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="rumormx_houses_${new Date().toISOString().split('T')[0]}.json"`);
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="rumormx_houses_${
+          new Date().toISOString().split("T")[0]
+        }.json"`
+      );
       res.json({
         export_date: new Date().toISOString(),
         total_records: houses.length,
-        data: houses
+        data: houses,
       });
     }
   } catch (err) {
