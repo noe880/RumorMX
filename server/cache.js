@@ -1,8 +1,5 @@
 const redis = require('redis');
 
-// Redis client configuration
-const redis = require('redis');
-
 // Usa la URL completa de Redis
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL, // ← Esto es lo más importante
