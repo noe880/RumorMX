@@ -1,10 +1,11 @@
 const redis = require('redis');
 
 // Redis client configuration
+const redis = require('redis');
+
+// Usa la URL completa de Redis
 const redisClient = redis.createClient({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
+  url: process.env.REDIS_URL, // ← Esto es lo más importante
   retry_strategy: (options) => {
     if (options.error && options.error.code === 'ECONNREFUSED') {
       console.error('Redis connection refused');
@@ -18,10 +19,15 @@ const redisClient = redis.createClient({
       console.error('Redis max retry attempts reached');
       return undefined;
     }
-    // Exponential backoff
     return Math.min(options.attempt * 100, 3000);
   }
 });
+
+// Conectar el cliente
+redisClient.on('error', (err) => console.error('Redis Client Error', err));
+redisClient.on('connect', () => console.log('✅ Connected to Redis'));
+
+await redisClient.connect(); // Importante en versiones recientes de redis
 
 // Handle Redis connection events
 redisClient.on('error', (err) => {
