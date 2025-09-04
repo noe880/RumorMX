@@ -11,6 +11,16 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Handle JSON parsing errors
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res
+      .status(400)
+      .json({ error: "JSON inválido en el cuerpo de la solicitud" });
+  }
+  next(err);
+});
+
 // Corregir la ruta del directorio público (agregar ../)
 app.use(express.static(path.join(__dirname, "../public")));
 

@@ -1,44 +1,44 @@
-const redis = require('redis');
+const redis = require("redis");
 
 // Usa la URL completa de Redis
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL, // ← Esto es lo más importante
   retry_strategy: (options) => {
-    if (options.error && options.error.code === 'ECONNREFUSED') {
-      console.error('Redis connection refused');
-      return new Error('Redis connection refused');
+    if (options.error && options.error.code === "ECONNREFUSED") {
+      console.error("Redis connection refused");
+      return new Error("Redis connection refused");
     }
     if (options.total_retry_time > 1000 * 60 * 60) {
-      console.error('Redis retry time exhausted');
-      return new Error('Retry time exhausted');
+      console.error("Redis retry time exhausted");
+      return new Error("Retry time exhausted");
     }
     if (options.attempt > 10) {
-      console.error('Redis max retry attempts reached');
+      console.error("Redis max retry attempts reached");
       return undefined;
     }
     return Math.min(options.attempt * 100, 3000);
-  }
+  },
 });
 
 // Conectar el cliente
-redisClient.on('error', (err) => console.error('Redis Client Error', err));
-redisClient.on('connect', () => console.log('✅ Connected to Redis'));
+redisClient.on("error", (err) => console.error("Redis Client Error", err));
+redisClient.on("connect", () => console.log("✅ Connected to Redis"));
 
 // Handle Redis connection events
-redisClient.on('error', (err) => {
-  console.error('Redis Client Error:', err);
+redisClient.on("error", (err) => {
+  console.error("Redis Client Error:", err);
 });
 
-redisClient.on('connect', () => {
-  console.log('✅ Redis client connected');
+redisClient.on("connect", () => {
+  console.log("✅ Redis client connected");
 });
 
-redisClient.on('ready', () => {
-  console.log('✅ Redis client ready');
+redisClient.on("ready", () => {
+  console.log("✅ Redis client ready");
 });
 
-redisClient.on('end', () => {
-  console.log('❌ Redis client disconnected');
+redisClient.on("end", () => {
+  console.log("❌ Redis client disconnected");
 });
 
 // Connect to Redis (async)
@@ -46,7 +46,10 @@ redisClient.on('end', () => {
   try {
     await redisClient.connect();
   } catch (err) {
-    console.warn('⚠️  Redis connection failed, falling back to in-memory cache:', err.message);
+    console.warn(
+      "⚠️  Redis connection failed, falling back to in-memory cache:",
+      err.message
+    );
   }
 })();
 
@@ -61,12 +64,16 @@ const CACHE_TTL = {
 // Cache key generators
 const generateCacheKey = {
   housesBounds: (south, north, west, east, limit) =>
-    `houses:bounds:${south.toFixed(4)}:${north.toFixed(4)}:${west.toFixed(4)}:${east.toFixed(4)}:${limit}`,
+    `houses:bounds:${south.toFixed(4)}:${north.toFixed(4)}:${west.toFixed(
+      4
+    )}:${east.toFixed(4)}:${limit}`,
 
   housesPopular: (area) => `houses:popular:${area}`,
 
   emojisBounds: (south, north, west, east, limit) =>
-    `emojis:bounds:${south.toFixed(4)}:${north.toFixed(4)}:${west.toFixed(4)}:${east.toFixed(4)}:${limit}`,
+    `emojis:bounds:${south.toFixed(4)}:${north.toFixed(4)}:${west.toFixed(
+      4
+    )}:${east.toFixed(4)}:${limit}`,
 
   topHouses: (limit) => `houses:top:${limit}`,
 };
@@ -104,7 +111,7 @@ class CacheManager {
         return entry.data;
       }
     } catch (err) {
-      console.error('Cache get error:', err);
+      console.error("Cache get error:", err);
       return null;
     }
   }
@@ -120,12 +127,12 @@ class CacheManager {
         // Fallback to in-memory cache
         this.fallbackCache.set(key, {
           data,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
         this.fallbackTTL.set(key, ttlSeconds * 1000);
       }
     } catch (err) {
-      console.error('Cache set error:', err);
+      console.error("Cache set error:", err);
     }
   }
 
@@ -139,7 +146,7 @@ class CacheManager {
         this.fallbackTTL.delete(key);
       }
     } catch (err) {
-      console.error('Cache delete error:', err);
+      console.error("Cache delete error:", err);
     }
   }
 
@@ -157,7 +164,7 @@ class CacheManager {
         this.fallbackTTL.clear();
       }
     } catch (err) {
-      console.error('Cache clear pattern error:', err);
+      console.error("Cache clear pattern error:", err);
     }
   }
 
@@ -212,12 +219,12 @@ class CacheManager {
 
   // Clear all houses-related cache
   async clearHousesCache() {
-    await this.clearPattern('houses:*');
+    await this.clearPattern("houses:*");
   }
 
   // Clear all emojis-related cache
   async clearEmojisCache() {
-    await this.clearPattern('emojis:*');
+    await this.clearPattern("emojis:*");
   }
 
   // Get cache statistics
@@ -226,22 +233,22 @@ class CacheManager {
       if (this.isRedisAvailable()) {
         const info = await redisClient.info();
         return {
-          type: 'redis',
+          type: "redis",
           connected: true,
-          info: info
+          info: info,
         };
       } else {
         return {
-          type: 'memory',
+          type: "memory",
           connected: false,
-          entries: this.fallbackCache.size
+          entries: this.fallbackCache.size,
         };
       }
     } catch (err) {
       return {
-        type: 'error',
+        type: "error",
         connected: false,
-        error: err.message
+        error: err.message,
       };
     }
   }
