@@ -24,15 +24,68 @@ const ALLOWED_EMOJIS = {
   FAL: "🎭",
 };
 
-// Obtener todas las viviendas
-router.get("/", (req, res) => {
-  const query = "SELECT * FROM houses ORDER BY created_at DESC";
+// Simple in-memory cache with TTL to reduce DB pressure on repeated viewport queries
+const CACHE_TTL_MS = 15000; // 15s
+const simpleCache = new Map();
+function getCached(key) {
+  const entry = simpleCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.t > CACHE_TTL_MS) {
+    simpleCache.delete(key);
+    return null;
+  }
+  return entry.v;
+}
+function setCached(key, value) {
+  simpleCache.set(key, { v: value, t: Date.now() });
+}
 
-  db.query(query, (err, results) => {
+// Obtener viviendas con estrategia de carga mejorada (bounds + limit + cache)
+router.get("/", (req, res) => {
+  const { north, south, east, west } = req.query;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 300, 1000);
+
+  const hasBounds =
+    north !== undefined && south !== undefined && east !== undefined && west !== undefined;
+
+  let query;
+  let params = [];
+
+  if (hasBounds) {
+    // Filtrar por viewport y limitar resultados
+    query = `
+      SELECT *
+      FROM houses
+      WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `;
+    params = [south, north, west, east, limit];
+  } else {
+    // Fallback: limitar siempre si no hay bounds (evita traer toda la BD)
+    query = `
+      SELECT *
+      FROM houses
+      ORDER BY created_at DESC
+      LIMIT ?
+    `;
+    params = [limit];
+  }
+
+  const cacheKey = `houses:${hasBounds ? `${south},${north},${west},${east}` : "no-bounds"}:${limit}`;
+  const cached = getCached(cacheKey);
+  if (cached) {
+    res.setHeader("Cache-Control", "public, max-age=15");
+    return res.json(cached);
+  }
+
+  db.query(query, params, (err, results) => {
     if (err) {
       console.error("Error obteniendo viviendas:", err);
       return res.status(500).json({ error: "Error interno del servidor" });
     }
+    setCached(cacheKey, results);
+    res.setHeader("Cache-Control", "public, max-age=15");
     res.json(results);
   });
 });
@@ -525,12 +578,20 @@ router.get("/top", (req, res) => {
 
 // -------- Emoji Routes --------
 
-// Obtener emojis en un área específica
+// Obtener emojis en un área específica (bounds + limit + cache)
 router.get("/emojis", (req, res) => {
   const { north, south, east, west } = req.query;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
 
   if (!north || !south || !east || !west) {
     return res.status(400).json({ error: "Faltan parámetros de límites" });
+  }
+
+  const cacheKey = `emojis:${south},${north},${west},${east}:${limit}`;
+  const cached = getCached(cacheKey);
+  if (cached) {
+    res.setHeader("Cache-Control", "public, max-age=15");
+    return res.json(cached);
   }
 
   const query = `
@@ -538,9 +599,10 @@ router.get("/emojis", (req, res) => {
     FROM location_emojis
     WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
     ORDER BY created_at DESC
+    LIMIT ?
   `;
 
-  db.query(query, [south, north, west, east], (err, results) => {
+  db.query(query, [south, north, west, east, limit], (err, results) => {
     if (err) {
       // Si la tabla no existe, devolver array vacío
       if (err.code === "ER_NO_SUCH_TABLE") {
@@ -552,6 +614,8 @@ router.get("/emojis", (req, res) => {
       console.error("Error obteniendo emojis:", err);
       return res.status(500).json({ error: "Error interno del servidor" });
     }
+    setCached(cacheKey, results);
+    res.setHeader("Cache-Control", "public, max-age=15");
     res.json(results);
   });
 });

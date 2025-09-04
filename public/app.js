@@ -17,6 +17,15 @@ window.addEventListener("load", async () => {
   setupTopPanel();
 });
 
+// Debounce helper
+function debounce(fn, wait) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), wait);
+  };
+}
+
 async function initMap() {
   const center = { lat: 23.6345, lng: -102.5528 };
 
@@ -57,14 +66,15 @@ async function initMap() {
     updateMarkersVisibility();
     updateEmojiVisibility();
 
-    map.on("moveend", () => {
+    const refresh = debounce(async () => {
+      await loadHouses();
+      await loadEmojis();
       updateMarkersVisibility();
       updateEmojiVisibility();
-    });
-    map.on("zoomend", () => {
-      updateMarkersVisibility();
-      updateEmojiVisibility();
-    });
+    }, 300);
+
+    map.on("moveend", refresh);
+    map.on("zoomend", refresh);
 
     const panel = document.getElementById("side-panel");
     if (panel) panel.classList.remove("open");
@@ -118,10 +128,37 @@ function createMarker(position, address, description, id = null) {
 
 async function loadHouses() {
   try {
-    const response = await fetch("/api/houses");
+    const bounds = map.getBounds();
+    // Si el zoom es muy bajo, no cargar demasiados puntos
+    const zoom = map.getZoom();
+    const limit = zoom < 8 ? 150 : zoom < 12 ? 400 : 1000;
+    const params = new URLSearchParams({
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+      limit: String(limit),
+    });
+
+    const response = await fetch(`/api/houses?${params}`);
     const houses = await response.json();
 
+    // Index existentes por id para reusar
+    const byId = new Map(markers.map((m) => [m.id, m]));
+    const seen = new Set();
+
     houses.forEach((house) => {
+      seen.add(house.id);
+      if (byId.has(house.id)) {
+        // Opcional: actualizar datos si cambiaron
+        const m = byId.get(house.id);
+        m.address = house.address;
+        m.description = house.description;
+        m.lat = house.lat;
+        m.lng = house.lng;
+        m.position = { lat: house.lat, lng: house.lng };
+        return;
+      }
       const position = { lat: house.lat, lng: house.lng };
       const marker = createMarker(
         position,
@@ -132,7 +169,16 @@ async function loadHouses() {
       markers.push(marker);
     });
 
-    // Ajustar visibilidad inicial
+    // Remover marcadores que ya no están en la ventana
+    const keep = [];
+    for (const m of markers) {
+      if (m.id && seen.has(m.id)) keep.push(m);
+      else {
+        try { m.remove(); } catch (_) {}
+      }
+    }
+    markers = keep;
+
     updateMarkersVisibility();
   } catch (error) {
     console.error("Error loading houses:", error);
@@ -142,33 +188,58 @@ async function loadHouses() {
 async function loadEmojis() {
   try {
     const bounds = map.getBounds();
+    const zoom = map.getZoom();
+    if (zoom < 6) {
+      // Evita cargar emojis con zoom muy bajo
+      emojiMarkers.forEach((m) => { try { m.remove(); } catch (_) {} });
+      emojiMarkers = [];
+      return;
+    }
+    const limit = zoom < 10 ? 200 : 1000;
     const params = new URLSearchParams({
       north: bounds.getNorth(),
       south: bounds.getSouth(),
       east: bounds.getEast(),
       west: bounds.getWest(),
+      limit: String(limit),
     });
 
     const response = await fetch(`/api/houses/emojis?${params}`);
     const emojis = await response.json();
 
-    // Limpiar emojis anteriores
-    emojiMarkers.forEach((marker) => marker.remove());
-    emojiMarkers = [];
+    // Reusar por id
+    const byId = new Map(emojiMarkers.map((m) => [m.id, m]));
+    const seen = new Set();
 
-    emojis.forEach((emoji) => {
-      const position = {
-        lat: parseFloat(emoji.lat),
-        lng: parseFloat(emoji.lng),
-      };
+    emojis.forEach((e) => {
+      const id = e.id;
+      seen.add(id);
+      const lat = parseFloat(e.lat);
+      const lng = parseFloat(e.lng);
+      if (byId.has(id)) {
+        const m = byId.get(id);
+        m.lat = lat;
+        m.lng = lng;
+        m.emoji = e.emoji;
+        m.emojiType = e.emoji_type;
+        return;
+      }
       const marker = createEmojiMarker(
-        position,
-        emoji.emoji,
-        emoji.emoji_type,
-        emoji.id
+        { lat, lng },
+        e.emoji,
+        e.emoji_type,
+        id
       );
       emojiMarkers.push(marker);
     });
+
+    // Limpia los que ya no están
+    const keep = [];
+    for (const m of emojiMarkers) {
+      if (m.id && seen.has(m.id)) keep.push(m);
+      else { try { m.remove(); } catch (_) {} }
+    }
+    emojiMarkers = keep;
 
     updateEmojiVisibility();
   } catch (error) {
