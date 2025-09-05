@@ -20,7 +20,7 @@ const ALLOWED_EMOJIS = {
   AMA: "💋",
   GAY: "🏳️‍🌈",
   EX: "💔",
-  COM: "💍",
+  COM: "🚩",
   ROL: "🔥",
   FAL: "🎭",
 };

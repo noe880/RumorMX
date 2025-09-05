@@ -800,7 +800,7 @@ function openCreateForm(position) {
         <button class="emoji-btn" data-type="AMA"><span class="emoji-icon">💋</span><span class="emoji-label">AMA</span></button>
         <button class="emoji-btn" data-type="GAY"><span class="emoji-icon">🏳️‍🌈</span><span class="emoji-label">GAY</span></button>
         <button class="emoji-btn" data-type="EX"><span class="emoji-icon">💔</span><span class="emoji-label">EX</span></button>
-        <button class="emoji-btn" data-type="COM"><span class="emoji-icon">💍</span><span class="emoji-label">COM</span></button>
+        <button class="emoji-btn" data-type="COM"><span class="emoji-icon">🚩</span><span class="emoji-label">COM</span></button>
         <button class="emoji-btn" data-type="ROL"><span class="emoji-icon">🔥</span><span class="emoji-label">ROL</span></button>
         <button class="emoji-btn" data-type="FAL"><span class="emoji-icon">🎭</span><span class="emoji-label">FAL</span></button>
       </div>
