@@ -19,6 +19,7 @@ const MEXICO_BOUNDS = {
 window.addEventListener("load", async () => {
   await initMap();
   setupTopPanel();
+  setupDonationModal();
 });
 
 // Debounce helper
@@ -1521,3 +1522,37 @@ async function loadHousesManually() {
 
 // Initialize export buttons when DOM is ready
 document.addEventListener("DOMContentLoaded", setupExportButtons);
+
+// Setup donation modal functionality
+function setupDonationModal() {
+  const modal = document.getElementById("donation-modal");
+  const closeBtn = document.getElementById("donation-modal-close");
+
+  if (!modal) return;
+
+  // Show modal on page load with a slight delay
+  setTimeout(() => {
+    modal.classList.add("show");
+  }, 1000); // 1 second delay
+
+  // Close modal when clicking the close button
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      modal.classList.remove("show");
+    });
+  }
+
+  // Close modal when clicking outside the modal content
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      modal.classList.remove("show");
+    }
+  });
+
+  // Close modal with Escape key
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal.classList.contains("show")) {
+      modal.classList.remove("show");
+    }
+  });
+}
