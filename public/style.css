@@ -340,6 +340,24 @@ body {
 .infowindow .primary {
   background: #2563eb;
   color: white;
+  position: relative;
+}
+.infowindow .primary.loading {
+  background: #6b7280;
+  cursor: not-allowed;
+}
+.infowindow .primary.loading::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ffffff;
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 .infowindow .danger {
   background: #ef4444;
@@ -850,7 +868,11 @@ body {
   top: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(147, 51, 234, 0.1));
+  background: linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.1),
+    rgba(147, 51, 234, 0.1)
+  );
   backdrop-filter: blur(8px);
 }
 
@@ -868,7 +890,8 @@ body {
   width: 90%;
   max-height: 85vh;
   overflow-y: auto;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
   animation: modalFadeIn 0.4s ease-out;
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -890,7 +913,11 @@ body {
   align-items: center;
   padding: 24px 28px 20px;
   border-bottom: 1px solid rgba(229, 231, 235, 0.5);
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(147, 51, 234, 0.05));
+  background: linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.05),
+    rgba(147, 51, 234, 0.05)
+  );
   position: relative;
 }
 

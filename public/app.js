@@ -892,6 +892,19 @@ function openCreateForm(position) {
     const description = content.querySelector("#desc").value.trim();
     if (!address || !description) return;
 
+    // Evitar envíos múltiples
+    if (content.__isSaving) return;
+    content.__isSaving = true;
+
+    const saveBtn = content.querySelector("#save");
+    const prevText = saveBtn ? saveBtn.textContent : null;
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.classList.add("loading");
+      saveBtn.setAttribute("aria-busy", "true");
+      saveBtn.textContent = "Guardando...";
+    }
+
     try {
       const houseData = {
         address,
@@ -917,6 +930,15 @@ function openCreateForm(position) {
       openDetail(marker, false);
     } catch (e) {
       console.error("Error saving house:", e);
+      alert("No se pudo guardar la nota. Reintenta.");
+    } finally {
+      content.__isSaving = false;
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.classList.remove("loading");
+        saveBtn.removeAttribute("aria-busy");
+        if (prevText != null) saveBtn.textContent = prevText;
+      }
     }
   });
 }
