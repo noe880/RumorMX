@@ -1,64 +1,72 @@
 const redis = require("redis");
 
-// Usa la URL completa de Redis
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL, // ← Esto es lo más importante
-  retry_strategy: (options) => {
-    if (options.error && options.error.code === "ECONNREFUSED") {
-      console.error("Redis connection refused");
-      return new Error("Redis connection refused");
-    }
-    if (options.total_retry_time > 1000 * 60 * 60) {
-      console.error("Redis retry time exhausted");
-      return new Error("Retry time exhausted");
-    }
-    if (options.attempt > 10) {
-      console.error("Redis max retry attempts reached");
-      return undefined;
-    }
-    return Math.min(options.attempt * 100, 3000);
-  },
-});
+// Utilidad: obtener URLs de Redis desde env (REDIS_URLS separado por comas o REDIS_URL único)
+function getRedisUrls() {
+  const urlsEnv = process.env.REDIS_URLS || process.env.REDIS_URL || "";
+  return urlsEnv
+    .split(/[ ,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
-// Conectar el cliente
-redisClient.on("error", (err) => console.error("Redis Client Error", err));
-redisClient.on("connect", () => console.log("✅ Connected to Redis"));
+// Crear múltiples clientes Redis (uno por URL)
+function createRedisClients() {
+  const urls = getRedisUrls();
+  // Si no hay URLs, devolvemos arreglo vacío y se usará fallback in-memory
+  const clients = urls.map((url, idx) => {
+    const client = redis.createClient({
+      url,
+      // Configuración de reconexión para redis v4
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 10)
+            return new Error("Redis max retry attempts reached");
+          return Math.min(retries * 100, 3000);
+        },
+      },
+    });
 
-// Handle Redis connection events
-redisClient.on("error", (err) => {
-  console.error("Redis Client Error:", err);
-});
-
-redisClient.on("connect", () => {
-  console.log("✅ Redis client connected");
-});
-
-redisClient.on("ready", () => {
-  console.log("✅ Redis client ready");
-});
-
-redisClient.on("end", () => {
-  console.log("❌ Redis client disconnected");
-});
-
-// Connect to Redis (async)
-(async () => {
-  try {
-    await redisClient.connect();
-  } catch (err) {
-    console.warn(
-      "⚠️  Redis connection failed, falling back to in-memory cache:",
-      err.message
+    // Eventos de conexión
+    client.on("error", (err) =>
+      console.error(`Redis[${idx}] Client Error:`, err)
     );
+    client.on("connect", () =>
+      console.log(`✅ Redis[${idx}] client connected (${url})`)
+    );
+    client.on("ready", () => console.log(`✅ Redis[${idx}] client ready`));
+    client.on("end", () => console.log(`❌ Redis[${idx}] client disconnected`));
+
+    return client;
+  });
+
+  return clients;
+}
+
+const redisClients = createRedisClients();
+
+// Conectar todos los clientes de forma async (si existen)
+(async () => {
+  for (const client of redisClients) {
+    try {
+      // Evitar doble conexión si ya está abierto
+      if (!client.isOpen) await client.connect();
+    } catch (err) {
+      console.warn("⚠️  Redis connection failed:", err.message);
+    }
   }
 })();
 
+// Helpers
+function getHealthyClients() {
+  return redisClients.filter((c) => c && c.isOpen);
+}
+
 // Cache configuration
 const CACHE_TTL = {
-  HOUSES_BOUNDS: 600, // 10 minutes for viewport queries (aumentado para mejor persistencia)
-  HOUSES_POPULAR: 600, // 10 minutes for popular areas
-  EMOJIS_BOUNDS: 180, // 3 minutes for emoji queries
-  TOP_HOUSES: 300, // 5 minutes for top houses
+  HOUSES_BOUNDS: 600, // 10 minutes
+  HOUSES_POPULAR: 600, // 10 minutes
+  EMOJIS_BOUNDS: 180, // 3 minutes
+  TOP_HOUSES: 300, // 5 minutes
 };
 
 // Cache key generators
@@ -78,51 +86,61 @@ const generateCacheKey = {
   topHouses: (limit) => `houses:top:${limit}`,
 };
 
-// Cache operations
+// Cache operations con soporte multi-Redis
 class CacheManager {
   constructor() {
     this.fallbackCache = new Map(); // In-memory fallback
     this.fallbackTTL = new Map();
   }
 
-  // Check if Redis is available
+  // Hay al menos un Redis conectado
   isRedisAvailable() {
-    return redisClient.isOpen;
+    return getHealthyClients().length > 0;
   }
 
-  // Get data from cache
+  // GET: intenta secuencialmente en los Redis saludables; si ninguno responde con dato, usa memoria
   async get(key) {
     try {
-      if (this.isRedisAvailable()) {
-        const data = await redisClient.get(key);
-        return data ? JSON.parse(data) : null;
-      } else {
-        // Fallback to in-memory cache
-        const entry = this.fallbackCache.get(key);
-        if (!entry) return null;
-
-        const now = Date.now();
-        if (now - entry.timestamp > (this.fallbackTTL.get(key) || 300000)) {
-          this.fallbackCache.delete(key);
-          this.fallbackTTL.delete(key);
-          return null;
+      const clients = getHealthyClients();
+      for (const client of clients) {
+        try {
+          const data = await client.get(key);
+          if (data != null) return JSON.parse(data);
+        } catch (e) {
+          // Continúa con el siguiente cliente
+          console.warn("Redis get error, trying next client:", e.message);
         }
-
-        return entry.data;
       }
+
+      // Fallback a memoria
+      const entry = this.fallbackCache.get(key);
+      if (!entry) return null;
+
+      const now = Date.now();
+      if (now - entry.timestamp > (this.fallbackTTL.get(key) || 300000)) {
+        this.fallbackCache.delete(key);
+        this.fallbackTTL.delete(key);
+        return null;
+      }
+
+      return entry.data;
     } catch (err) {
       console.error("Cache get error:", err);
       return null;
     }
   }
 
-  // Set data in cache
+  // SET: escribe en todos los Redis saludables; si ninguno disponible, escribe en memoria
   async set(key, data, ttlSeconds = 300) {
     try {
       const serializedData = JSON.stringify(data);
+      const clients = getHealthyClients();
 
-      if (this.isRedisAvailable()) {
-        await redisClient.setEx(key, ttlSeconds, serializedData);
+      if (clients.length > 0) {
+        const ops = clients.map((c) =>
+          c.setEx(key, ttlSeconds, serializedData)
+        );
+        await Promise.allSettled(ops);
       } else {
         // Fallback to in-memory cache
         this.fallbackCache.set(key, {
@@ -136,15 +154,16 @@ class CacheManager {
     }
   }
 
-  // Delete cache entry
+  // DEL: elimina en todos los Redis saludables o en memoria
   async del(key) {
     try {
-      if (this.isRedisAvailable()) {
-        await redisClient.del(key);
-      } else {
-        this.fallbackCache.delete(key);
-        this.fallbackTTL.delete(key);
+      const clients = getHealthyClients();
+      if (clients.length > 0) {
+        const ops = clients.map((c) => c.del(key));
+        await Promise.allSettled(ops);
       }
+      this.fallbackCache.delete(key);
+      this.fallbackTTL.delete(key);
     } catch (err) {
       console.error("Cache delete error:", err);
     }
@@ -153,16 +172,28 @@ class CacheManager {
   // Clear all cache entries matching pattern
   async clearPattern(pattern) {
     try {
-      if (this.isRedisAvailable()) {
-        const keys = await redisClient.keys(pattern);
-        if (keys.length > 0) {
-          await redisClient.del(keys);
+      const clients = getHealthyClients();
+      if (clients.length > 0) {
+        for (const c of clients) {
+          try {
+            // Usar scanIterator para evitar bloquear con KEYS
+            const keys = [];
+            for await (const key of c.scanIterator({ MATCH: pattern })) {
+              keys.push(key);
+              if (keys.length >= 500) {
+                // Borrar en lotes
+                await c.del(keys.splice(0, keys.length));
+              }
+            }
+            if (keys.length > 0) await c.del(keys);
+          } catch (e) {
+            console.warn("Redis clearPattern error:", e.message);
+          }
         }
-      } else {
-        // For in-memory, clear all entries (simple implementation)
-        this.fallbackCache.clear();
-        this.fallbackTTL.clear();
       }
+      // Limpiar fallback en memoria
+      this.fallbackCache.clear();
+      this.fallbackTTL.clear();
     } catch (err) {
       console.error("Cache clear pattern error:", err);
     }
@@ -230,13 +261,26 @@ class CacheManager {
   // Get cache statistics
   async getStats() {
     try {
-      if (this.isRedisAvailable()) {
-        const info = await redisClient.info();
-        return {
-          type: "redis",
-          connected: true,
-          info: info,
-        };
+      const clients = getHealthyClients();
+      if (clients.length > 0) {
+        // Tomamos info del primero disponible
+        try {
+          const info = await clients[0].info();
+          return {
+            type: "redis",
+            connected: true,
+            instances: clients.length,
+            info: info,
+          };
+        } catch (e) {
+          return {
+            type: "redis",
+            connected: true,
+            instances: clients.length,
+            info: null,
+            note: "info() falló en el primer cliente",
+          };
+        }
       } else {
         return {
           type: "memory",
