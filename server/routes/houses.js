@@ -154,12 +154,32 @@ router.get("/:id/details", async (req, res) => {
   }
 });
 
-// Crear una nueva vivienda (límite 10 por día por usuario)
+// Crear una nueva vivienda (límite 10 por día por usuario + rate limit por IP y captcha opcional)
 router.post("/", async (req, res) => {
-  const { address, description, lat, lng } = req.body;
+  const { address, description, lat, lng, captcha_token } = req.body || {};
 
-  if (!address || !description || lat === undefined || lng === undefined) {
-    return res.status(400).json({ error: "Faltan campos requeridos" });
+  // Validaciones básicas y sanitización
+  if (
+    !address ||
+    !description ||
+    lat === undefined ||
+    lng === undefined ||
+    typeof address !== "string" ||
+    typeof description !== "string" ||
+    typeof lat !== "number" ||
+    typeof lng !== "number"
+  ) {
+    return res
+      .status(400)
+      .json({ error: "Faltan o son inválidos los campos requeridos" });
+  }
+  const cleanAddress = address.trim().slice(0, 200);
+  const cleanDescription = description.trim().slice(0, 1000);
+  if (!cleanAddress || !cleanDescription) {
+    return res.status(400).json({ error: "Contenido vacío no permitido" });
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: "Coordenadas inválidas" });
   }
 
   // Identificar al "usuario" mediante cookie persistente (reutilizamos reaction_token)
@@ -173,76 +193,119 @@ router.post("/", async (req, res) => {
     setCookieHeader = cookie;
   }
 
-  // Rate limit: 10 viviendas por día por token (día UTC)
+  // Rate limit compuesto: por token diario + por IP en ventana corta
   const now = new Date();
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, "0");
   const d = String(now.getUTCDate()).padStart(2, "0");
   const dayKey = `${y}${m}${d}`;
-  const rlKey = `rl:houses:${token}:${dayKey}`;
+  const rlKeyDaily = `rl:houses:${token}:${dayKey}`;
+  const ip = (req.ip || "").toString();
+  const ipKeyMinute = `rl:houses:ip:${ip}:m`; // ventana 60s
+  const ipKeyHour = `rl:houses:ip:${ip}:h`; // ventana 1h
 
   try {
-    const current = (await cacheManager.get(rlKey)) || 0;
-    if (current >= 10) {
+    // Límite diario por token (10)
+    const currentDaily = (await cacheManager.get(rlKeyDaily)) || 0;
+    if (currentDaily >= 10) {
       return res
         .status(429)
         .json({
           error: "Has alcanzado el límite de 10 viviendas creadas por día",
         });
     }
+
+    // Límite por IP: máx 5 por minuto y 60 por hora
+    const minuteCount = await cacheManager.incr(ipKeyMinute, 60);
+    const hourCount = await cacheManager.incr(ipKeyHour, 3600);
+
+    if (minuteCount > 5 || hourCount > 60) {
+      return res
+        .status(429)
+        .json({
+          error: "Demasiadas solicitudes desde tu IP. Intenta más tarde.",
+        });
+    }
+
+    // Cooldown por token: máx 1 inserción cada 10 segundos
+    const cdKey = `rl:houses:cooldown:${token}`;
+    const cdCount = await cacheManager.incr(cdKey, 10);
+    if (cdCount > 1) {
+      return res
+        .status(429)
+        .json({
+          error:
+            "Estás enviando muy rápido. Intenta de nuevo en unos segundos.",
+        });
+    }
+
+    // Anti-duplicados por contenido (hash de address+description+lat+lng)
+    const contentHash = crypto
+      .createHash("sha1")
+      .update(`${cleanAddress}|${cleanDescription}|${lat}|${lng}`)
+      .digest("hex");
+    const dupKey = `rl:houses:content:${contentHash}`;
+    const dupCount = await cacheManager.incr(dupKey, 600); // ventana 10 minutos
+    if (dupCount > 3) {
+      return res.status(409).json({ error: "Contenido duplicado detectado" });
+    }
   } catch (e) {
-    console.warn("RateLimit read error:", e?.message || e);
+    console.warn("RateLimit check error:", e?.message || e);
   }
 
   const query =
     "INSERT INTO houses (address, description, lat, lng) VALUES (?, ?, ?, ?)";
 
-  db.query(query, [address, description, lat, lng], async (err, results) => {
-    if (err) {
-      console.error("Error creando vivienda:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
-    }
-
-    // Incrementar contador y ajustar TTL hasta el inicio del próximo día UTC
-    try {
-      const now2 = new Date();
-      const tomorrowUtc = new Date(
-        Date.UTC(
-          now2.getUTCFullYear(),
-          now2.getUTCMonth(),
-          now2.getUTCDate() + 1,
-          0,
-          0,
-          0
-        )
-      );
-      const ttl = Math.max(
-        60,
-        Math.floor((tomorrowUtc.getTime() - Date.now()) / 1000)
-      );
-      const prev = (await cacheManager.get(rlKey)) || 0;
-      await cacheManager.set(rlKey, prev + 1, ttl);
-    } catch (e) {
-      console.warn("RateLimit write error:", e?.message || e);
-    }
-
-    // Clear cache for houses and top houses
-    cacheManager.clearHousesCache();
-    cacheManager.del("top-houses:*");
-
-    // Obtener la vivienda recién creada
-    const selectQuery = "SELECT * FROM houses WHERE id = ?";
-    db.query(selectQuery, [results.insertId], (err2, houseResults) => {
-      if (err2) {
-        console.error("Error obteniendo vivienda creada:", err2);
+  db.query(
+    query,
+    [cleanAddress, cleanDescription, lat, lng],
+    async (err, results) => {
+      if (err) {
+        console.error("Error creando vivienda:", err);
         return res.status(500).json({ error: "Error interno del servidor" });
       }
-      if (setCookieHeader) {
-        res.setHeader("Set-Cookie", setCookieHeader);
+
+      // Incrementar contador diario y ajustar TTL hasta el inicio del próximo día UTC
+      try {
+        const now2 = new Date();
+        const tomorrowUtc = new Date(
+          Date.UTC(
+            now2.getUTCFullYear(),
+            now2.getUTCMonth(),
+            now2.getUTCDate() + 1,
+            0,
+            0,
+            0
+          )
+        );
+        const ttl = Math.max(
+          60,
+          Math.floor((tomorrowUtc.getTime() - Date.now()) / 1000)
+        );
+        const prev = (await cacheManager.get(rlKeyDaily)) || 0;
+        await cacheManager.set(rlKeyDaily, prev + 1, ttl);
+      } catch (e) {
+        console.warn("RateLimit write error:", e?.message || e);
       }
-      res.status(201).json(houseResults[0]);
-    });
-  });
+
+      // Clear cache for houses and top houses
+      cacheManager.clearHousesCache();
+      cacheManager.del("top-houses:*");
+
+      // Obtener la vivienda recién creada
+      const selectQuery = "SELECT * FROM houses WHERE id = ?";
+      db.query(selectQuery, [results.insertId], (err2, houseResults) => {
+        if (err2) {
+          console.error("Error obteniendo vivienda creada:", err2);
+          return res.status(500).json({ error: "Error interno del servidor" });
+        }
+        if (setCookieHeader) {
+          res.setHeader("Set-Cookie", setCookieHeader);
+        }
+        res.status(201).json(houseResults[0]);
+      });
+    }
+  );
 });
 
 // Actualizar una vivienda existente

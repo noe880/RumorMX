@@ -89,8 +89,39 @@ const generateCacheKey = {
 // Cache operations con soporte multi-Redis
 class CacheManager {
   constructor() {
-    this.fallbackCache = new Map(); // In-memory fallback
-    this.fallbackTTL = new Map();
+    this.fallbackCache = new Map(); // In-memory fallback (key -> {data, timestamp})
+    this.fallbackTTL = new Map(); // In-memory TTL for cache keys (ms)
+    this.fallbackCounters = new Map(); // In-memory counters (key -> {count, expiresAt})
+  }
+
+  // Atomic-like increment with TTL. Returns the new count.
+  async incr(key, ttlSeconds = 60) {
+    const clients = getHealthyClients();
+    // Try Redis instances first
+    for (const client of clients) {
+      try {
+        const count = await client.incr(key);
+        if (count === 1) {
+          // Set expiry only on first creation
+          await client.expire(key, ttlSeconds);
+        }
+        return count;
+      } catch (e) {
+        console.warn("Redis incr error, trying next client:", e.message);
+      }
+    }
+
+    // Fallback to in-memory counter
+    const now = Date.now();
+    const entry = this.fallbackCounters.get(key);
+    if (!entry || entry.expiresAt <= now) {
+      const expiresAt = now + Math.max(1, ttlSeconds) * 1000;
+      this.fallbackCounters.set(key, { count: 1, expiresAt });
+      return 1;
+    } else {
+      entry.count += 1;
+      return entry.count;
+    }
   }
 
   // Hay al menos un Redis conectado
