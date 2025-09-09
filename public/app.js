@@ -20,6 +20,7 @@ window.addEventListener("load", async () => {
   await initMap();
   setupTopPanel();
   setupDonationModal();
+  loadDonationProgress(); // Load donation progress on page load
 });
 
 // Debounce helper
@@ -1267,6 +1268,8 @@ function setupTopPanel() {
       try {
         if (!topLoadedOnce) await fetchTopNotes();
         renderTopList(cachedTop);
+        // Load donation progress when panel opens
+        loadDonationProgress();
       } catch (e) {
         console.error("Error cargando Top 10:", e);
         const container = document.getElementById("top-list");
@@ -1577,4 +1580,38 @@ function setupDonationModal() {
       modal.classList.remove("show");
     }
   });
+}
+
+// Load and update donation progress
+async function loadDonationProgress() {
+  try {
+    const response = await fetch("/api/payments/progress");
+    const data = await response.json();
+
+    // Update side panel progress bar
+    const progressFill = document.getElementById("progress-fill");
+    const currentAmount = document.getElementById("current-amount");
+    const progressPercentage = document.getElementById("progress-percentage");
+
+    if (progressFill && currentAmount && progressPercentage) {
+      progressFill.style.width = `${data.percentage}%`;
+      currentAmount.textContent = data.total.toFixed(2);
+      progressPercentage.textContent = `${data.percentage}%`;
+    }
+
+    // Update modal progress bar
+    const modalProgressFill = document.getElementById("modal-progress-fill");
+    const modalCurrentAmount = document.getElementById("modal-current-amount");
+    const modalProgressPercentage = document.getElementById(
+      "modal-progress-percentage"
+    );
+
+    if (modalProgressFill && modalCurrentAmount && modalProgressPercentage) {
+      modalProgressFill.style.width = `${data.percentage}%`;
+      modalCurrentAmount.textContent = data.total.toFixed(2);
+      modalProgressPercentage.textContent = `${data.percentage}%`;
+    }
+  } catch (error) {
+    console.error("Error loading donation progress:", error);
+  }
 }

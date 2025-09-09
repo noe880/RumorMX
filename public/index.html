@@ -48,9 +48,32 @@
 
       <!-- Sección de donaciones -->
       <div class="donations-section">
-        <h3>❤️ Donaciones</h3>
-        <p>Gracias a las donaciones, se mantiene el servidor que permite el funcionamiento de RumorMX.</p>
-        <a href="https://buy.stripe.com/eVqeVd6e4dmw9PFg6T1oI02" target="_blank" rel="noopener noreferrer" class="donation-button">Donar ahora</a>
+        <h3>❤️ Gracias</h3>
+
+        <!-- Barra de progreso -->
+        <div class="donation-progress-container">
+          <div class="progress-info">
+            <span class="progress-amount"
+              >$<span id="current-amount">0</span> / $50,000</span
+            >
+            <span class="progress-percentage" id="progress-percentage">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div
+              class="progress-fill"
+              id="progress-fill"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <a
+          href="https://buy.stripe.com/eVqeVd6e4dmw9PFg6T1oI02"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="donation-button"
+          >Donar ahora</a
+        >
       </div>
     </aside>
 
@@ -76,30 +99,53 @@
       <div class="donation-modal-content">
         <div class="donation-modal-header">
           <div class="donation-modal-logo">
-            <img src="img/favicon.png" alt="RumorMX Logo" class="donation-logo">
-            <h2>¡Apoya RumorMX! 🚀</h2>
+            <img
+              src="img/favicon.png"
+              alt="RumorMX Logo"
+              class="donation-logo"
+            />
+            <h2>¡Cierre de RumorMX!</h2>
           </div>
-          <button id="donation-modal-close" class="donation-modal-close">&times;</button>
+          <button id="donation-modal-close" class="donation-modal-close">
+            &times;
+          </button>
         </div>
         <div class="donation-modal-body">
           <div class="donation-message">
-            <p class="donation-text">Tu donación no solo mantiene el servidor activo, también me motiva a seguir creando y mejorando este proyecto 🚀.</p>
-            <div class="donation-benefits">
-              <div class="benefit-item">
-                <span class="benefit-icon">⚡</span>
-                <span>Mantiene el servidor funcionando</span>
+            <p class="donation-text">
+              He creado esta página como un
+              <strong>proyecto independiente</strong>, al que le he
+              <strong>dediacado mucho trabajo y esfuerzo</strong>, y por
+              <strong>motivos externos</strong>, se
+              <strong>cerrará automáticamente al alcanzar la meta</strong>. Esta
+              meta es especialmente importante para mí, ya que
+              <strong>permitirá continuar financiando mis estudios</strong>. 🎓
+            </p>
+            <!-- Barra de progreso en el modal -->
+            <div class="donation-progress-container">
+              <div class="progress-info">
+                <span class="progress-amount"
+                  >$<span id="modal-current-amount">0</span> / $50,000</span
+                >
+                <span class="progress-percentage" id="modal-progress-percentage"
+                  >0%</span
+                >
               </div>
-              <div class="benefit-item">
-                <span class="benefit-icon">🚀</span>
-                <span>Nuevas funcionalidades</span>
-              </div>
-              <div class="benefit-item">
-                <span class="benefit-icon">💝</span>
-                <span>Apoya el desarrollo continuo</span>
+              <div class="progress-bar">
+                <div
+                  class="progress-fill"
+                  id="modal-progress-fill"
+                  style="width: 0%"
+                ></div>
               </div>
             </div>
           </div>
-          <a href="https://buy.stripe.com/eVqeVd6e4dmw9PFg6T1oI02" target="_blank" rel="noopener noreferrer" class="donation-modal-button">
+          <a
+            href="https://buy.stripe.com/eVqeVd6e4dmw9PFg6T1oI02"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="donation-modal-button"
+          >
             <span class="button-icon">❤️</span>
             Donar ahora
           </a>
