@@ -324,8 +324,8 @@ router.get("/:id/comments", (req, res) => {
   });
 });
 
-// Crear un comentario para una vivienda
-router.post("/:id/comments", (req, res) => {
+// Crear un comentario para una vivienda con límite de 10 por día por usuario
+router.post("/:id/comments", async (req, res) => {
   const id = parseInt(req.params.id);
   const { comment } = req.body;
 
@@ -333,11 +333,64 @@ router.post("/:id/comments", (req, res) => {
     return res.status(400).json({ error: "Comentario requerido" });
   }
 
+  // Identificar al "usuario" mediante cookie persistente (reutilizamos reaction_token)
+  let token = getCookieFromHeader(req, "reaction_token");
+  let setCookieHeader = null;
+  if (!token || token.length !== 64) {
+    token = crypto.randomBytes(32).toString("hex"); // 64 chars hex
+    const cookie = `reaction_token=${encodeURIComponent(token)}; Max-Age=${
+      60 * 60 * 24 * 365 * 2
+    }; Path=/; SameSite=Lax`;
+    setCookieHeader = cookie;
+  }
+
+  // Rate limit: 10 comentarios por día por token (día UTC)
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  const dayKey = `${y}${m}${d}`;
+  const rlKey = `rl:comments:${token}:${dayKey}`;
+
+  try {
+    const current = (await cacheManager.get(rlKey)) || 0;
+    if (current >= 10) {
+      return res
+        .status(429)
+        .json({ error: "Has alcanzado el límite de 10 comentarios por día" });
+    }
+  } catch (e) {
+    console.warn("RateLimit read error:", e?.message || e);
+  }
+
   const q = "INSERT INTO comments (house_id, comment) VALUES (?, ?)";
-  db.query(q, [id, comment.trim()], (err, results) => {
+  db.query(q, [id, comment.trim()], async (err, results) => {
     if (err) {
       console.error("Error creando comentario:", err);
       return res.status(500).json({ error: "Error interno del servidor" });
+    }
+
+    // Incrementar contador y ajustar TTL hasta el inicio del próximo día UTC
+    try {
+      const now2 = new Date();
+      const tomorrowUtc = new Date(
+        Date.UTC(
+          now2.getUTCFullYear(),
+          now2.getUTCMonth(),
+          now2.getUTCDate() + 1,
+          0,
+          0,
+          0
+        )
+      );
+      const ttl = Math.max(
+        60,
+        Math.floor((tomorrowUtc.getTime() - Date.now()) / 1000)
+      );
+      const prev = (await cacheManager.get(rlKey)) || 0;
+      await cacheManager.set(rlKey, prev + 1, ttl);
+    } catch (e) {
+      console.warn("RateLimit write error:", e?.message || e);
     }
 
     const selectQ =
@@ -346,6 +399,9 @@ router.post("/:id/comments", (req, res) => {
       if (err2) {
         console.error("Error obteniendo comentario creado:", err2);
         return res.status(500).json({ error: "Error interno del servidor" });
+      }
+      if (setCookieHeader) {
+        res.setHeader("Set-Cookie", setCookieHeader);
       }
       res.status(201).json(rows[0]);
     });
