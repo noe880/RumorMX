@@ -931,7 +931,9 @@ function openCreateForm(position) {
       openDetail(marker, false);
     } catch (e) {
       console.error("Error saving house:", e);
-      alert("No se pudo guardar la nota. Reintenta.");
+      alert(
+        "No se pudo guardar la nota. Has alcanzado el límite de 10 notas por día."
+      );
     } finally {
       content.__isSaving = false;
       if (saveBtn) {

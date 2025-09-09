@@ -154,21 +154,76 @@ router.get("/:id/details", async (req, res) => {
   }
 });
 
-// Crear una nueva vivienda
-router.post("/", (req, res) => {
+// Crear una nueva vivienda (límite 10 por día por usuario)
+router.post("/", async (req, res) => {
   const { address, description, lat, lng } = req.body;
 
   if (!address || !description || lat === undefined || lng === undefined) {
     return res.status(400).json({ error: "Faltan campos requeridos" });
   }
 
+  // Identificar al "usuario" mediante cookie persistente (reutilizamos reaction_token)
+  let token = getCookieFromHeader(req, "reaction_token");
+  let setCookieHeader = null;
+  if (!token || token.length !== 64) {
+    token = crypto.randomBytes(32).toString("hex"); // 64 chars hex
+    const cookie = `reaction_token=${encodeURIComponent(token)}; Max-Age=${
+      60 * 60 * 24 * 365 * 2
+    }; Path=/; SameSite=Lax`;
+    setCookieHeader = cookie;
+  }
+
+  // Rate limit: 10 viviendas por día por token (día UTC)
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  const dayKey = `${y}${m}${d}`;
+  const rlKey = `rl:houses:${token}:${dayKey}`;
+
+  try {
+    const current = (await cacheManager.get(rlKey)) || 0;
+    if (current >= 10) {
+      return res
+        .status(429)
+        .json({
+          error: "Has alcanzado el límite de 10 viviendas creadas por día",
+        });
+    }
+  } catch (e) {
+    console.warn("RateLimit read error:", e?.message || e);
+  }
+
   const query =
     "INSERT INTO houses (address, description, lat, lng) VALUES (?, ?, ?, ?)";
 
-  db.query(query, [address, description, lat, lng], (err, results) => {
+  db.query(query, [address, description, lat, lng], async (err, results) => {
     if (err) {
       console.error("Error creando vivienda:", err);
       return res.status(500).json({ error: "Error interno del servidor" });
+    }
+
+    // Incrementar contador y ajustar TTL hasta el inicio del próximo día UTC
+    try {
+      const now2 = new Date();
+      const tomorrowUtc = new Date(
+        Date.UTC(
+          now2.getUTCFullYear(),
+          now2.getUTCMonth(),
+          now2.getUTCDate() + 1,
+          0,
+          0,
+          0
+        )
+      );
+      const ttl = Math.max(
+        60,
+        Math.floor((tomorrowUtc.getTime() - Date.now()) / 1000)
+      );
+      const prev = (await cacheManager.get(rlKey)) || 0;
+      await cacheManager.set(rlKey, prev + 1, ttl);
+    } catch (e) {
+      console.warn("RateLimit write error:", e?.message || e);
     }
 
     // Clear cache for houses and top houses
@@ -177,10 +232,13 @@ router.post("/", (req, res) => {
 
     // Obtener la vivienda recién creada
     const selectQuery = "SELECT * FROM houses WHERE id = ?";
-    db.query(selectQuery, [results.insertId], (err, houseResults) => {
-      if (err) {
-        console.error("Error obteniendo vivienda creada:", err);
+    db.query(selectQuery, [results.insertId], (err2, houseResults) => {
+      if (err2) {
+        console.error("Error obteniendo vivienda creada:", err2);
         return res.status(500).json({ error: "Error interno del servidor" });
+      }
+      if (setCookieHeader) {
+        res.setHeader("Set-Cookie", setCookieHeader);
       }
       res.status(201).json(houseResults[0]);
     });
