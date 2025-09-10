@@ -117,20 +117,32 @@ async function retryFetch(
 async function initMap() {
   const center = { lat: 23.6345, lng: -102.5528 };
 
-  const token = (window.MAPBOX_TOKEN || "").trim();
-  if (!token) {
-    alert("Falta el token de Mapbox. Define window.MAPBOX_TOKEN en index.html");
-    return;
-  }
-  mapboxgl.accessToken = token;
+  // MapLibre no requiere token, es gratuito
 
   // Inicializar botón del ojo
   loadHousesButton = document.getElementById("load-houses-button");
 
   // Crear mapa full-screen con límites de México
-  map = new mapboxgl.Map({
+  map = new maplibregl.Map({
     container: "map",
-    style: "mapbox://styles/mapbox/streets-v12",
+    style: {
+      version: 8,
+      sources: {
+        "osm": {
+          type: "raster",
+          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          attribution: "© OpenStreetMap contributors"
+        }
+      },
+      layers: [
+        {
+          id: "osm",
+          type: "raster",
+          source: "osm"
+        }
+      ]
+    }, // Estilo gratuito con ciudades de OpenStreetMap
     center: [center.lng, center.lat],
     zoom: 5,
     minZoom: 5,
@@ -142,7 +154,7 @@ async function initMap() {
     pitchWithRotate: false,
   });
 
-  popup = new mapboxgl.Popup({
+  popup = new maplibregl.Popup({
     closeButton: true,
     closeOnClick: false,
     offset: 28, // separación vertical del marcador
@@ -216,7 +228,7 @@ function createMarker(position, address, description, id = null) {
   const displayText = address ? trimText(address, 12) : "Nueva nota";
   ctx.fillText(displayText, 28, 24);
 
-  const marker = new mapboxgl.Marker({ element: canvas, anchor: "bottom" })
+  const marker = new maplibregl.Marker({ element: canvas, anchor: "bottom" })
     .setLngLat([position.lng, position.lat])
     .addTo(map);
 
@@ -279,7 +291,7 @@ function createClusterMarker(position, count) {
   const text = count > 99 ? "99+" : count.toString();
   ctx.fillText(text, size / 2 + 2, size / 2 + 2);
 
-  const marker = new mapboxgl.Marker({ element: canvas, anchor: "center" })
+  const marker = new maplibregl.Marker({ element: canvas, anchor: "center" })
     .setLngLat([position.lng, position.lat])
     .addTo(map);
 
@@ -500,7 +512,7 @@ function createEmojiMarker(position, emoji, emojiType, id) {
     user-select: none;
   `;
 
-  const marker = new mapboxgl.Marker({
+  const marker = new maplibregl.Marker({
     element: emojiDiv,
     anchor: "center",
   })

@@ -6,7 +6,7 @@
     <title>RumorMX</title>
     <link rel="stylesheet" href="style.css" />
     <link
-      href="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css"
+      href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
       rel="stylesheet"
     />
 
@@ -85,13 +85,11 @@
       </div>
     </div>
 
-    <!-- Mapbox GL JS -->
-    <script src="https://api.tiles.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <!-- MapLibre GL JS -->
+    <script src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"></script>
     <script>
-      // Define tu token de Mapbox aquí o inyéctalo desde el servidor
-      window.MAPBOX_TOKEN =
-        (window.MAPBOX_TOKEN || "").trim() ||
-        "pk.eyJ1Ijoibm9lcmlvczg4MCIsImEiOiJjbWYzYmVtdmcwMXUwMmpvaGU1ajE0eHEyIn0.3KFQ5oxEiGrw-O6kY-4_bg";
+      // MapLibre no requiere token, es gratuito y open-source
+      window.MAPBOX_TOKEN = ""; // No longer needed
     </script>
 
     <!-- Modal de donaciones -->

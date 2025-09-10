@@ -498,10 +498,10 @@ body {
 /* ======================
    Mapbox Popup (nuevo)
    ====================== */
-.mapboxgl-popup {
+.maplibregl-popup {
   max-width: none !important; /* evitar límite global por defecto */
 }
-.mapboxgl-popup-content {
+.maplibregl-popup-content {
   padding: 12px !important;
   border-radius: 12px !important;
   width: auto !important; /* permite que el contenido gestione el ancho */
@@ -509,7 +509,7 @@ body {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
 }
 /* Asegurar buena posición y clic cómodo del botón cerrar */
-.mapboxgl-popup-close-button {
+.maplibregl-popup-close-button {
   font-size: 18px;
   right: 6px !important;
   top: 6px !important;
@@ -517,24 +517,24 @@ body {
   height: 28px;
   border-radius: 6px;
 }
-.mapboxgl-popup-close-button:hover {
+.maplibregl-popup-close-button:hover {
   background: rgba(0, 0, 0, 0.06);
 }
 /* Forzar scroll vertical solo en la sección de comentarios */
-.mapboxgl-popup-content .infowindow {
+.maplibregl-popup-content .infowindow {
   max-height: 70vh; /* Mayor altura para dar espacio a la descripción */
   overflow: visible; /* permitir que el contenido se expanda */
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
-.mapboxgl-popup-content .comments-section {
+.maplibregl-popup-content .comments-section {
   overflow-y: auto; /* scroll solo en comentarios */
   overscroll-behavior: contain;
   min-height: 0; /* permitir que se encoja */
   max-height: 220px; /* límite máximo para comentarios */
 }
-.mapboxgl-popup-content .comment-form {
+.maplibregl-popup-content .comment-form {
   flex-shrink: 0; /* no se encoja */
   margin-top: 10px;
 }
