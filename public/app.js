@@ -568,17 +568,21 @@ async function openDetail(marker, shouldCenter = true) {
   if (!marker.id) return;
 
   try {
-    console.log("Fetching details for marker ID:", marker.id);
-    // Fetch detailed data with retry mechanism
-    const response = await retryFetch(`/api/houses/${marker.id}/details`);
+    console.log("Fetching full data for marker ID:", marker.id);
+    // Fetch all data in a single request
+    const response = await retryFetch(`/api/houses/${marker.id}/full`);
 
     console.log("Response status:", response.status);
-    const houseDetails = await response.json();
-    console.log("House details received:", houseDetails);
+    const fullData = await response.json();
+    console.log("Full data received:", fullData);
+
+    if (!fullData) {
+      throw new Error("Vivienda no encontrada");
+    }
 
     // Update marker with full data
-    marker.description = houseDetails.description;
-    marker.address = houseDetails.address;
+    marker.description = fullData.house.description;
+    marker.address = fullData.house.address;
 
     // Render full content
     content.innerHTML = `
@@ -592,7 +596,7 @@ async function openDetail(marker, shouldCenter = true) {
       </div>
 
       <div class="comments-section">
-        <div class="comments-title"><strong>Comentarios</strong></div>
+        <div class="comments-title"><strong>Comentarios</strong> (${fullData.comments.length})</div>
         <div class="comments-list"></div>
       </div>
       <div class="comment-form quick-form" style="padding: 0 10px;">
@@ -605,8 +609,8 @@ async function openDetail(marker, shouldCenter = true) {
       </div>
     `;
 
-    // Load house reactions
-    loadHouseReactions(marker.id, content);
+    // Load house reactions from the full data
+    renderHouseReactions(fullData.house_reactions, content, marker.id);
 
     const listEl = content.querySelector(".comments-list");
     const inputEl = content.querySelector("#comment-input");
@@ -617,14 +621,36 @@ async function openDetail(marker, shouldCenter = true) {
     inputEl.setAttribute("inputmode", "none");
     setTimeout(() => inputEl.removeAttribute("inputmode"), 100);
 
-    const renderComments = (comments) => {
+    let currentOffset = 0;
+    const commentsPerPage = 20;
+    let allComments = [];
+    let hasMoreComments = false;
+
+    const renderComments = (comments, pagination) => {
       if (!Array.isArray(comments) || comments.length === 0) {
         listEl.innerHTML =
           '<div class="comment-empty" style="color:#6b7280;font-size:13px;">Sé el primero en comentar</div>';
         return;
       }
+
+      // If this is the first load, clear the list
+      if (currentOffset === 0) {
+        listEl.innerHTML = "";
+        allComments = [];
+      }
+
+      // Add new comments to the collection
+      allComments = allComments.concat(comments);
+
+      // Update pagination info
+      if (pagination) {
+        hasMoreComments = pagination.hasMore;
+        currentOffset = pagination.offset + pagination.limit;
+      }
+
+      // Re-render all comments
       listEl.innerHTML = "";
-      comments.forEach((c) => {
+      allComments.forEach((c) => {
         const item = document.createElement("div");
         item.className = "comment-item";
         const when = c.created_at
@@ -643,15 +669,65 @@ async function openDetail(marker, shouldCenter = true) {
 
         listEl.appendChild(item);
       });
+
+      // Add "Load More" button if there are more comments
+      if (hasMoreComments) {
+        const loadMoreBtn = document.createElement("button");
+        loadMoreBtn.className = "load-more-comments";
+        loadMoreBtn.style.cssText = "width:100%; padding:8px; margin:8px 0; background:#f3f4f6; border:1px solid #d1d5db; border-radius:6px; color:#374151; font-size:13px; cursor:pointer;";
+        loadMoreBtn.textContent = "Cargar más comentarios";
+        loadMoreBtn.addEventListener("click", loadMoreComments);
+        listEl.appendChild(loadMoreBtn);
+      }
     };
 
-    const loadComments = async () => {
+    const loadMoreComments = async () => {
+      try {
+        const loadMoreBtn = listEl.querySelector(".load-more-comments");
+        if (loadMoreBtn) {
+          loadMoreBtn.disabled = true;
+          loadMoreBtn.textContent = "Cargando...";
+        }
+
+        const params = new URLSearchParams({
+          limit: String(commentsPerPage),
+          offset: String(currentOffset)
+        });
+
+        const resp = await retryFetch(`/api/houses/${marker.id}/comments?${params}`);
+        const data = await resp.json();
+
+        renderComments(data.comments, data.pagination);
+      } catch (e) {
+        console.error("Error cargando más comentarios:", e);
+        const loadMoreBtn = listEl.querySelector(".load-more-comments");
+        if (loadMoreBtn) {
+          loadMoreBtn.disabled = false;
+          loadMoreBtn.textContent = "Cargar más comentarios";
+        }
+      }
+    };
+
+    // Render comments from the full data
+    const mockPagination = {
+      total: fullData.comments.length,
+      limit: 20,
+      offset: 0,
+      hasMore: false // For now, assume no more in full endpoint
+    };
+    renderComments(fullData.comments, mockPagination);
+
+    const loadComments = debounce(async () => {
       try {
         listEl.innerHTML =
           '<div style="color:#6b7280;font-size:13px;">Cargando comentarios...</div>';
-        const resp = await retryFetch(`/api/houses/${marker.id}/comments`);
+        const params = new URLSearchParams({
+          limit: String(commentsPerPage),
+          offset: "0"
+        });
+        const resp = await retryFetch(`/api/houses/${marker.id}/comments?${params}`);
         const data = await resp.json();
-        renderComments(data);
+        renderComments(data.comments, data.pagination);
       } catch (e) {
         console.error("Error cargando comentarios:", e);
         listEl.innerHTML =
@@ -659,29 +735,41 @@ async function openDetail(marker, shouldCenter = true) {
         // Auto-retry once after a delay
         setTimeout(() => loadComments(), 2000);
       }
-    };
+    }, 300);
 
+    let isSubmittingComment = false;
     submitEl.addEventListener("click", async () => {
       const txt = (inputEl.value || "").trim();
-      if (!txt) return;
+      if (!txt || isSubmittingComment) return;
+
+      isSubmittingComment = true;
+      const originalText = submitEl.textContent;
+      submitEl.disabled = true;
+      submitEl.textContent = "Enviando...";
+
       try {
-        submitEl.disabled = true;
         const resp = await retryFetch(`/api/houses/${marker.id}/comments`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ comment: txt }),
         });
-        inputEl.value = "";
-        await loadComments();
+
+        if (resp.ok) {
+          inputEl.value = "";
+          // Reload comments to show the new one
+          await loadComments();
+        } else {
+          throw new Error("Error en la respuesta del servidor");
+        }
       } catch (e) {
         console.error("Error enviando comentario:", e);
         alert("No se pudo enviar el comentario. Reinténtalo.");
       } finally {
+        isSubmittingComment = false;
         submitEl.disabled = false;
+        submitEl.textContent = originalText;
       }
     });
-
-    loadComments();
   } catch (error) {
     console.error("Error loading house details:", error);
     let errorMessage = "Error al cargar los detalles";

@@ -95,6 +95,208 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Obtener detalles completos de una vivienda específica con reacciones y comentarios
+router.get("/:id/full", async (req, res) => {
+  const id = parseInt(req.params.id);
+  const token = getCookieFromHeader(req, "reaction_token");
+
+  if (isNaN(id) || id <= 0) {
+    return res.status(400).json({ error: "ID de vivienda inválido" });
+  }
+
+  const fetchFullHouseData = () => {
+    return new Promise((resolve, reject) => {
+      // Get house details with counts
+      const houseQuery = `
+        SELECT h.*,
+               COALESCE(rc.reaction_count, 0) AS reaction_count,
+               COALESCE(cc.comment_count, 0) AS comment_count
+        FROM houses h
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS reaction_count
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL
+          GROUP BY house_id
+        ) rc ON rc.house_id = h.id
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS comment_count
+          FROM comments
+          GROUP BY house_id
+        ) cc ON cc.house_id = h.id
+        WHERE h.id = ?
+      `;
+
+      db.query(houseQuery, [id], (err, houseResults) => {
+        if (err) {
+          console.error("Error obteniendo detalles de vivienda:", err);
+          return reject(err);
+        }
+
+        if (!houseResults || houseResults.length === 0) {
+          return resolve(null);
+        }
+
+        const house = houseResults[0];
+
+        // Get house reactions
+        const houseReactionsQuery = `
+          SELECT reaction, COUNT(*) AS cnt
+          FROM comment_reactions
+          WHERE house_id = ?
+          GROUP BY reaction
+        `;
+
+        db.query(houseReactionsQuery, [id], (err2, houseReactionRows) => {
+          if (err2) {
+            console.error("Error obteniendo reacciones de casa:", err2);
+            return reject(err2);
+          }
+
+          const houseReactions = { like: 0, love: 0, haha: 0, wow: 0, sad: 0, angry: 0 };
+          for (const r of houseReactionRows || []) {
+            houseReactions[r.reaction] = Number(r.cnt) || 0;
+          }
+
+          // Get user reaction for house
+          const userHouseReactionQuery = token ?
+            "SELECT reaction FROM comment_reactions WHERE house_id = ? AND reaction_token = ?" : null;
+
+          const getUserHouseReaction = userHouseReactionQuery ?
+            new Promise((resolveUser, rejectUser) => {
+              db.query(userHouseReactionQuery, [id, token], (err3, userRows) => {
+                if (err3) return rejectUser(err3);
+                resolveUser(userRows && userRows.length > 0 ? userRows[0].reaction : null);
+              });
+            }) : Promise.resolve(null);
+
+          // Get comments with reactions (paginated)
+          const commentsLimit = 20; // Limit for full endpoint
+          const commentsQuery = `
+            SELECT id, house_id, comment, created_at
+            FROM comments
+            WHERE house_id = ?
+            ORDER BY created_at ASC
+            LIMIT ${commentsLimit}
+          `;
+
+          db.query(commentsQuery, [id], (err4, comments) => {
+            if (err4) {
+              console.error("Error obteniendo comentarios:", err4);
+              return reject(err4);
+            }
+
+            if (!comments || comments.length === 0) {
+              getUserHouseReaction.then(userReaction => {
+                resolve({
+                  house,
+                  house_reactions: {
+                    house_id: id,
+                    reactions: houseReactions,
+                    user_reaction: userReaction
+                  },
+                  comments: []
+                });
+              }).catch(reject);
+              return;
+            }
+
+            const commentIds = comments.map(c => c.id);
+
+            // Get comment reactions
+            const commentReactionsQuery = `
+              SELECT comment_id, reaction, COUNT(*) AS cnt
+              FROM comment_reactions
+              WHERE comment_id IN (?) AND house_id IS NULL
+              GROUP BY comment_id, reaction
+            `;
+
+            db.query(commentReactionsQuery, [commentIds], (err5, commentReactionRows) => {
+              if (err5) {
+                console.error("Error obteniendo reacciones de comentarios:", err5);
+                return reject(err5);
+              }
+
+              const commentCountsMap = new Map();
+              for (const r of commentReactionRows || []) {
+                if (!commentCountsMap.has(r.comment_id)) {
+                  commentCountsMap.set(r.comment_id, {});
+                }
+                commentCountsMap.get(r.comment_id)[r.reaction] = Number(r.cnt) || 0;
+              }
+
+              // Get user reactions for comments
+              const userCommentReactionsQuery = token ?
+                "SELECT comment_id, reaction FROM comment_reactions WHERE reaction_token = ? AND comment_id IN (?) AND house_id IS NULL" : null;
+
+              const getUserCommentReactions = userCommentReactionsQuery ?
+                new Promise((resolveUser, rejectUser) => {
+                  db.query(userCommentReactionsQuery, [token, commentIds], (err6, userCommentRows) => {
+                    if (err6) return rejectUser(err6);
+                    const userMap = new Map();
+                    for (const u of userCommentRows || []) {
+                      userMap.set(u.comment_id, u.reaction);
+                    }
+                    resolveUser(userMap);
+                  });
+                }) : Promise.resolve(new Map());
+
+              Promise.all([getUserHouseReaction, getUserCommentReactions]).then(([userHouseReaction, userCommentMap]) => {
+                const commentsWithReactions = comments.map(c => ({
+                  id: c.id,
+                  house_id: c.house_id,
+                  comment: c.comment,
+                  created_at: c.created_at,
+                  reactions: {
+                    like: commentCountsMap.get(c.id)?.like || 0,
+                    love: commentCountsMap.get(c.id)?.love || 0,
+                    haha: commentCountsMap.get(c.id)?.haha || 0,
+                    wow: commentCountsMap.get(c.id)?.wow || 0,
+                    sad: commentCountsMap.get(c.id)?.sad || 0,
+                    angry: commentCountsMap.get(c.id)?.angry || 0,
+                  },
+                  user_reaction: userCommentMap.get(c.id) || null,
+                }));
+
+                resolve({
+                  house,
+                  house_reactions: {
+                    house_id: id,
+                    reactions: houseReactions,
+                    user_reaction: userHouseReaction
+                  },
+                  comments: commentsWithReactions
+                });
+              }).catch(reject);
+            });
+          });
+        });
+      });
+    });
+  };
+
+  try {
+    const result = await cacheManager.getOrSet(
+      `house-full:${id}:${token || 'anonymous'}`,
+      fetchFullHouseData,
+      300 // 5 minutes TTL
+    );
+
+    if (!result) {
+      return res.status(404).json({ error: "Vivienda no encontrada" });
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
+    res.json(result);
+  } catch (err) {
+    console.error("Error obteniendo datos completos de vivienda:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
 // Obtener detalles completos de una vivienda específica
 router.get("/:id/details", async (req, res) => {
   const id = parseInt(req.params.id);
@@ -109,9 +311,20 @@ router.get("/:id/details", async (req, res) => {
     return new Promise((resolve, reject) => {
       const query = `
         SELECT h.*,
-               0 AS reaction_count,
-               0 AS comment_count
+               COALESCE(rc.reaction_count, 0) AS reaction_count,
+               COALESCE(cc.comment_count, 0) AS comment_count
         FROM houses h
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS reaction_count
+          FROM comment_reactions
+          WHERE house_id IS NOT NULL
+          GROUP BY house_id
+        ) rc ON rc.house_id = h.id
+        LEFT JOIN (
+          SELECT house_id, COUNT(*) AS comment_count
+          FROM comments
+          GROUP BY house_id
+        ) cc ON cc.house_id = h.id
         WHERE h.id = ?
       `;
 
@@ -374,75 +587,119 @@ function getCookieFromHeader(req, name) {
 }
 
 // Obtener comentarios de una vivienda con conteo de reacciones y reacción del usuario
-router.get("/:id/comments", (req, res) => {
+router.get("/:id/comments", async (req, res) => {
   const id = parseInt(req.params.id);
-  const q =
-    "SELECT id, house_id, comment, created_at FROM comments WHERE house_id = ? ORDER BY created_at ASC";
+  const token = getCookieFromHeader(req, "reaction_token");
+  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100); // Default 20, max 100
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0); // Default 0
 
-  db.query(q, [id], (err, comments) => {
-    if (err) {
-      console.error("Error obteniendo comentarios:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
-    }
+  const fetchCommentsWithReactions = () => {
+    return new Promise((resolve, reject) => {
+      const q =
+        "SELECT id, house_id, comment, created_at FROM comments WHERE house_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?";
 
-    if (!comments || comments.length === 0) {
-      return res.json([]);
-    }
-
-    const commentIds = comments.map((c) => c.id);
-    const token = getCookieFromHeader(req, "reaction_token");
-
-    // Obtener conteos por reacción (solo para comentarios, no casas)
-    const countsQ =
-      "SELECT comment_id, reaction, COUNT(*) AS cnt FROM comment_reactions WHERE comment_id IN (?) AND house_id IS NULL GROUP BY comment_id, reaction";
-    db.query(countsQ, [commentIds], (err2, countsRows) => {
-      if (err2) {
-        console.error("Error obteniendo conteos de reacciones:", err2);
-        return res.status(500).json({ error: "Error interno del servidor" });
-      }
-
-      // Mapear conteos
-      const countsMap = new Map(); // comment_id -> {reaction: count}
-      for (const r of countsRows || []) {
-        if (!countsMap.has(r.comment_id)) countsMap.set(r.comment_id, {});
-        countsMap.get(r.comment_id)[r.reaction] = Number(r.cnt) || 0;
-      }
-
-      const attachAndSend = (userRows) => {
-        const userMap = new Map(); // comment_id -> reaction
-        for (const u of userRows || []) userMap.set(u.comment_id, u.reaction);
-
-        const result = comments.map((c) => ({
-          id: c.id,
-          house_id: c.house_id,
-          comment: c.comment,
-          created_at: c.created_at,
-          reactions: {
-            like: countsMap.get(c.id)?.like || 0,
-            love: countsMap.get(c.id)?.love || 0,
-            haha: countsMap.get(c.id)?.haha || 0,
-            wow: countsMap.get(c.id)?.wow || 0,
-            sad: countsMap.get(c.id)?.sad || 0,
-            angry: countsMap.get(c.id)?.angry || 0,
-          },
-          user_reaction: userMap.get(c.id) || null,
-        }));
-        return res.json(result);
-      };
-
-      if (!token) return attachAndSend([]);
-
-      const userQ =
-        "SELECT comment_id, reaction FROM comment_reactions WHERE reaction_token = ? AND comment_id IN (?) AND house_id IS NULL";
-      db.query(userQ, [token, commentIds], (err3, userRows) => {
-        if (err3) {
-          console.error("Error obteniendo reacciones del usuario:", err3);
-          return res.status(500).json({ error: "Error interno del servidor" });
+      db.query(q, [id, limit, offset], (err, comments) => {
+        if (err) {
+          console.error("Error obteniendo comentarios:", err);
+          return reject(err);
         }
-        attachAndSend(userRows);
+
+        if (!comments || comments.length === 0) {
+          return resolve([]);
+        }
+
+        const commentIds = comments.map((c) => c.id);
+
+        // Obtener conteos por reacción (solo para comentarios, no casas)
+        const countsQ =
+          "SELECT comment_id, reaction, COUNT(*) AS cnt FROM comment_reactions WHERE comment_id IN (?) AND house_id IS NULL GROUP BY comment_id, reaction";
+        db.query(countsQ, [commentIds], (err2, countsRows) => {
+          if (err2) {
+            console.error("Error obteniendo conteos de reacciones:", err2);
+            return reject(err2);
+          }
+
+          // Mapear conteos
+          const countsMap = new Map(); // comment_id -> {reaction: count}
+          for (const r of countsRows || []) {
+            if (!countsMap.has(r.comment_id)) countsMap.set(r.comment_id, {});
+            countsMap.get(r.comment_id)[r.reaction] = Number(r.cnt) || 0;
+          }
+
+          const attachUserReactions = (userRows) => {
+            const userMap = new Map(); // comment_id -> reaction
+            for (const u of userRows || []) userMap.set(u.comment_id, u.reaction);
+
+            const result = comments.map((c) => ({
+              id: c.id,
+              house_id: c.house_id,
+              comment: c.comment,
+              created_at: c.created_at,
+              reactions: {
+                like: countsMap.get(c.id)?.like || 0,
+                love: countsMap.get(c.id)?.love || 0,
+                haha: countsMap.get(c.id)?.haha || 0,
+                wow: countsMap.get(c.id)?.wow || 0,
+                sad: countsMap.get(c.id)?.sad || 0,
+                angry: countsMap.get(c.id)?.angry || 0,
+              },
+              user_reaction: userMap.get(c.id) || null,
+            }));
+            resolve(result);
+          };
+
+          if (!token) return attachUserReactions([]);
+
+          const userQ =
+            "SELECT comment_id, reaction FROM comment_reactions WHERE reaction_token = ? AND comment_id IN (?) AND house_id IS NULL";
+          db.query(userQ, [token, commentIds], (err3, userRows) => {
+            if (err3) {
+              console.error("Error obteniendo reacciones del usuario:", err3);
+              return reject(err3);
+            }
+            attachUserReactions(userRows);
+          });
+        });
       });
     });
-  });
+  };
+
+  try {
+    const cacheKey = `house-comments:${id}:${token || 'anonymous'}:${limit}:${offset}`;
+    const result = await cacheManager.getOrSet(
+      cacheKey,
+      fetchCommentsWithReactions,
+      300 // 5 minutes TTL for comments
+    );
+
+    // Get total count for pagination info
+    const totalCount = await new Promise((resolve, reject) => {
+      db.query("SELECT COUNT(*) as total FROM comments WHERE house_id = ?", [id], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows[0].total);
+      });
+    });
+
+    const response = {
+      comments: result,
+      pagination: {
+        total: totalCount,
+        limit,
+        offset,
+        hasMore: offset + limit < totalCount
+      }
+    };
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
+    res.json(response);
+  } catch (err) {
+    console.error("Error obteniendo comentarios:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
 
 // Crear un comentario para una vivienda con límite de 10 por día por usuario
@@ -514,6 +771,17 @@ router.post("/:id/comments", async (req, res) => {
       console.warn("RateLimit write error:", e?.message || e);
     }
 
+    // Clear caches for this house
+    try {
+      await cacheManager.del(`house-full:${id}:*`);
+      await cacheManager.del(`house-details:${id}`);
+      await cacheManager.del(`house-comments:${id}:*`);
+      await cacheManager.del(`house-reactions:${id}:*`);
+      cacheManager.clearHousesCache(); // Clear houses list cache too
+    } catch (e) {
+      console.warn("Cache clear error:", e?.message || e);
+    }
+
     const selectQ =
       "SELECT id, house_id, comment, created_at FROM comments WHERE id = ?";
     db.query(selectQ, [results.insertId], (err2, rows) => {
@@ -557,11 +825,26 @@ router.post("/comments/:commentId/reactions", (req, res) => {
     ON DUPLICATE KEY UPDATE reaction = VALUES(reaction), created_at = CURRENT_TIMESTAMP
   `;
 
-  db.query(upsertQ, [commentId, token, reaction], (err, _result) => {
+  db.query(upsertQ, [commentId, token, reaction], async (err, _result) => {
     if (err) {
       // si hay error por falta de índice único, avisar al usuario que se requiere
       console.error("Error guardando reacción:", err);
       return res.status(500).json({ error: "Error guardando reacción" });
+    }
+
+    // Clear caches for the house containing this comment
+    try {
+      // Get house_id from comment
+      const houseQuery = "SELECT house_id FROM comments WHERE id = ?";
+      db.query(houseQuery, [commentId], async (err3, houseRows) => {
+        if (!err3 && houseRows && houseRows.length > 0) {
+          const houseId = houseRows[0].house_id;
+          await cacheManager.del(`house-full:${houseId}:*`);
+          await cacheManager.del(`house-comments:${houseId}:*`);
+        }
+      });
+    } catch (e) {
+      console.warn("Cache clear error:", e?.message || e);
     }
 
     // Devolver conteos actualizados y la reacción del usuario
@@ -631,49 +914,71 @@ router.delete("/comments/:commentId/reactions", (req, res) => {
 });
 
 // Get reactions for a house
-router.get("/:id/reactions", (req, res) => {
+router.get("/:id/reactions", async (req, res) => {
   const houseId = parseInt(req.params.id);
   const token = getCookieFromHeader(req, "reaction_token");
 
-  // Get reaction counts for the house
-  const countsQ = `
-    SELECT reaction, COUNT(*) AS cnt
-    FROM comment_reactions
-    WHERE house_id = ?
-    GROUP BY reaction
-  `;
+  const fetchHouseReactions = () => {
+    return new Promise((resolve, reject) => {
+      // Get reaction counts for the house
+      const countsQ = `
+        SELECT reaction, COUNT(*) AS cnt
+        FROM comment_reactions
+        WHERE house_id = ?
+        GROUP BY reaction
+      `;
 
-  db.query(countsQ, [houseId], (err, countsRows) => {
-    if (err) {
-      console.error("Error obteniendo conteos de reacciones de casa:", err);
-      return res.status(500).json({ error: "Error interno del servidor" });
-    }
+      db.query(countsQ, [houseId], (err, countsRows) => {
+        if (err) {
+          console.error("Error obteniendo conteos de reacciones de casa:", err);
+          return reject(err);
+        }
 
-    const counts = { like: 0, love: 0, haha: 0, wow: 0, sad: 0, angry: 0 };
-    for (const r of countsRows || []) counts[r.reaction] = Number(r.cnt) || 0;
+        const counts = { like: 0, love: 0, haha: 0, wow: 0, sad: 0, angry: 0 };
+        for (const r of countsRows || []) counts[r.reaction] = Number(r.cnt) || 0;
 
-    const attachUserReaction = (userRows) => {
-      const userReaction =
-        userRows && userRows.length > 0 ? userRows[0].reaction : null;
-      return res.json({
-        house_id: houseId,
-        reactions: counts,
-        user_reaction: userReaction,
+        const attachUserReaction = (userRows) => {
+          const userReaction =
+            userRows && userRows.length > 0 ? userRows[0].reaction : null;
+          resolve({
+            house_id: houseId,
+            reactions: counts,
+            user_reaction: userReaction,
+          });
+        };
+
+        if (!token) return attachUserReaction([]);
+
+        const userQ =
+          "SELECT reaction FROM comment_reactions WHERE house_id = ? AND reaction_token = ?";
+        db.query(userQ, [houseId, token], (err2, userRows) => {
+          if (err2) {
+            console.error("Error obteniendo reacción del usuario:", err2);
+            return reject(err2);
+          }
+          attachUserReaction(userRows);
+        });
       });
-    };
-
-    if (!token) return attachUserReaction([]);
-
-    const userQ =
-      "SELECT reaction FROM comment_reactions WHERE house_id = ? AND reaction_token = ?";
-    db.query(userQ, [houseId, token], (err2, userRows) => {
-      if (err2) {
-        console.error("Error obteniendo reacción del usuario:", err2);
-        return res.status(500).json({ error: "Error interno del servidor" });
-      }
-      attachUserReaction(userRows);
     });
-  });
+  };
+
+  try {
+    const result = await cacheManager.getOrSet(
+      `house-reactions:${houseId}:${token || 'anonymous'}`,
+      fetchHouseReactions,
+      300 // 5 minutes TTL for reactions
+    );
+
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader(
+      "X-Cache-Status",
+      cacheManager.isRedisAvailable() ? "redis" : "memory"
+    );
+    res.json(result);
+  } catch (err) {
+    console.error("Error obteniendo reacciones de casa:", err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
 
 // Create/update reaction for a house
@@ -703,10 +1008,20 @@ router.post("/:id/reactions", (req, res) => {
     ON DUPLICATE KEY UPDATE reaction = VALUES(reaction), created_at = CURRENT_TIMESTAMP
   `;
 
-  db.query(upsertQ, [houseId, token, reaction], (err, _result) => {
+  db.query(upsertQ, [houseId, token, reaction], async (err, _result) => {
     if (err) {
       console.error("Error guardando reacción de casa:", err);
       return res.status(500).json({ error: "Error guardando reacción" });
+    }
+
+    // Clear caches for this house
+    try {
+      await cacheManager.del(`house-full:${houseId}:*`);
+      await cacheManager.del(`house-details:${houseId}`);
+      await cacheManager.del(`house-reactions:${houseId}:*`);
+      cacheManager.clearHousesCache(); // Clear houses list cache too
+    } catch (e) {
+      console.warn("Cache clear error:", e?.message || e);
     }
 
     // Return updated counts
