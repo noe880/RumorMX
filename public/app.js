@@ -125,24 +125,7 @@ async function initMap() {
   // Crear mapa full-screen con límites de México
   map = new maplibregl.Map({
     container: "map",
-    style: {
-      version: 8,
-      sources: {
-        "osm": {
-          type: "raster",
-          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "© OpenStreetMap contributors"
-        }
-      },
-      layers: [
-        {
-          id: "osm",
-          type: "raster",
-          source: "osm"
-        }
-      ]
-    }, // Estilo gratuito con ciudades de OpenStreetMap
+    style: "https://api.maptiler.com/maps/streets/style.json?key=H27Cy6WhpwA1W2G3Uqz1", // MapTiler con ciudades detalladas
     center: [center.lng, center.lat],
     zoom: 5,
     minZoom: 5,
