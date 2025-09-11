@@ -3,6 +3,7 @@ const cors = require("cors");
 const path = require("path");
 const houseRoutes = require("./routes/houses");
 const paymentRoutes = require("./routes/payments");
+const chatRoutes = require("./routes/chat");
 require("./config/database");
 
 const app = express();
@@ -38,6 +39,7 @@ app.use(express.static(path.join(__dirname, "../public")));
 // Rutas
 app.use("/api/houses", houseRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/chat", chatRoutes);
 
 // Servir la aplicación frontend
 app.get("/", (req, res) => {

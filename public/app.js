@@ -2,9 +2,11 @@ let map;
 let markers = [];
 let emojiMarkers = [];
 let clusterMarkers = [];
+let chatZoneMarkers = [];
 let popup;
 let currentDetailMarker = null;
 let loadHousesButton = null;
+let chatZoneButton = null;
 let isLoadingHouses = false;
 let lastLoadedBounds = null;
 
@@ -17,10 +19,16 @@ const MEXICO_BOUNDS = {
 };
 
 window.addEventListener("load", async () => {
+  // Load chat zones immediately on page load
+  await loadChatZones();
+
   await initMap();
   setupTopPanel();
   setupDonationModal();
   loadDonationProgress(); // Load donation progress on page load
+
+  // Restore chat session if user was previously in a chat
+  restoreChatSession();
 });
 
 // Debounce helper
@@ -119,8 +127,9 @@ async function initMap() {
 
   // MapLibre no requiere token, es gratuito
 
-  // Inicializar botón del ojo
+  // Inicializar botones
   loadHousesButton = document.getElementById("load-houses-button");
+  chatZoneButton = document.getElementById("chat-zone-button");
 
   // Crear mapa full-screen con límites de México
   map = new maplibregl.Map({
@@ -145,23 +154,77 @@ async function initMap() {
   });
 
   map.on("load", async () => {
-    // Inicializar botón del ojo
+    // Inicializar botones
     setupLoadHousesButton();
+    setupChatZoneButton();
+    setupCreatePrivateChatButton();
 
     // No cargar casas automáticamente, solo emojis
     await loadEmojis();
+    // Chat zones are already loaded on page load, just update visibility
     preloadTopNotes();
 
     updateMarkersVisibility();
     updateEmojiVisibility();
     updateClusterVisibility();
+    updateChatZoneMarkersVisibility(); // Update chat zone markers visibility
+
+    // Initial button visibility and nearby chat check
+    updateLoadHousesButtonVisibility();
+    updateChatZoneButtonVisibility();
+    updateCreatePrivateChatButtonVisibility();
+    checkNearbyChats();
+
+    // Start periodic chat zones refresh
+    startChatZonesRefresh();
 
     const refresh = debounce(async () => {
       // Solo actualizar visibilidad, no cargar casas automáticamente
+      // Add chat zone markers to map now that it's ready
+      console.log('Map loaded, adding chat zone markers:', chatZoneMarkers.length);
+      console.log('Current map zoom:', map.getZoom());
+      console.log('Current map center:', map.getCenter());
+  
+      chatZoneMarkers.forEach((marker, index) => {
+        console.log(`Processing marker ${index}:`, {
+          zoneId: marker.zoneId,
+          lat: marker.lat,
+          lng: marker.lng,
+          visible: marker._visible,
+          hasElement: !!marker.getElement()
+        });
+  
+        if (!marker._visible) {
+          try {
+            marker.addTo(map);
+            marker._visible = true;
+            console.log(`Successfully added marker ${index} to map`);
+          } catch (error) {
+            console.error(`Failed to add marker ${index} to map:`, error);
+          }
+        } else {
+          console.log(`Marker ${index} already visible`);
+        }
+      });
+  
+      // Force visibility update after adding markers
+      setTimeout(() => {
+        updateChatZoneMarkersVisibility();
+      }, 1000);
+  
       updateMarkersVisibility();
       updateEmojiVisibility();
       updateClusterVisibility();
+      updateChatZoneMarkersVisibility(); // Update chat zone markers visibility
       updateLoadHousesButtonVisibility();
+      updateChatZoneButtonVisibility();
+      updateCreatePrivateChatButtonVisibility();
+
+      // Check if user moved away from chat zone
+      checkChatZoneProximity();
+
+      // Check for nearby active chats
+      checkNearbyChats();
     }, 300);
 
     map.on("moveend", refresh);
@@ -1459,6 +1522,66 @@ function setupLoadHousesButton() {
   updateLoadHousesButtonVisibility();
 }
 
+// Setup chat zone button functionality
+function setupChatZoneButton() {
+  console.log('Setting up chat zone button:', chatZoneButton);
+  if (!chatZoneButton) {
+    console.error('Chat zone button not found!');
+    return;
+  }
+
+  chatZoneButton.addEventListener("click", async () => {
+    console.log('Chat zone button clicked');
+    createPrivateChat();
+  });
+
+  console.log('Chat zone button event listener attached');
+
+  // Initial check for button visibility
+  updateChatZoneButtonVisibility();
+}
+
+// Setup create private chat button functionality
+function setupCreatePrivateChatButton() {
+  const createPrivateChatButton = document.getElementById("create-private-chat-button");
+  console.log('Setting up create private chat button:', createPrivateChatButton);
+
+  if (!createPrivateChatButton) {
+    console.error('Create private chat button not found!');
+    return;
+  }
+
+  createPrivateChatButton.addEventListener("click", async () => {
+    console.log('Create private chat button clicked');
+    createPrivateChat();
+  });
+
+  console.log('Create private chat button event listener attached');
+
+  // Initial check for button visibility
+  updateCreatePrivateChatButtonVisibility();
+}
+
+// Update create private chat button visibility
+function updateCreatePrivateChatButtonVisibility() {
+  const createPrivateChatButton = document.getElementById("create-private-chat-button");
+  if (!createPrivateChatButton) return;
+
+  const zoom = map.getZoom();
+
+  // Show button when zoomed in enough (>= 14, same as other buttons)
+  if (zoom >= 14) {
+    createPrivateChatButton.style.display = "flex";
+    createPrivateChatButton.classList.add("show");
+  } else {
+    createPrivateChatButton.classList.remove("show");
+    setTimeout(() => {
+      createPrivateChatButton.style.display = "none";
+    }, 300); // Wait for animation to complete
+  }
+}
+
+
 // Check if there are houses nearby and show/hide the button
 async function checkHousesNearby() {
   try {
@@ -1503,6 +1626,31 @@ async function updateLoadHousesButtonVisibility() {
   }
 }
 
+// Update chat zone button visibility based on zoom
+function updateChatZoneButtonVisibility() {
+  if (!chatZoneButton) {
+    console.error('Chat zone button not found');
+    return;
+  }
+
+  const zoom = map.getZoom();
+
+  // Show button when zoomed in enough for area chat (>= 14, same as eye button)
+  console.log('Chat button visibility check - zoom:', zoom, 'button element:', chatZoneButton);
+  if (zoom >= 14) {
+    chatZoneButton.style.display = "flex";
+    chatZoneButton.classList.add("show");
+    console.log('Chat button should be visible');
+  } else {
+    chatZoneButton.classList.remove("show");
+    setTimeout(() => {
+      chatZoneButton.style.display = "none";
+    }, 300); // Wait for animation to complete
+    console.log('Chat button should be hidden');
+  }
+}
+
+
 // Clear all markers and clusters from the map
 function clearAllMarkers() {
   // Clear house markers
@@ -1520,6 +1668,14 @@ function clearAllMarkers() {
     } catch (_) {}
   });
   clusterMarkers = [];
+
+  // Clear chat zone markers
+  chatZoneMarkers.forEach((m) => {
+    try {
+      m.remove();
+    } catch (_) {}
+  });
+  chatZoneMarkers = [];
 }
 
 // Load houses manually when button is clicked
@@ -1630,6 +1786,245 @@ async function loadHousesManually() {
   }
 }
 
+// Create chat zone marker
+function createChatZoneMarker(zone) {
+  console.log('Creating chat zone marker for zone:', zone);
+
+  const chatIcon = document.createElement("div");
+  chatIcon.className = "chat-zone-marker";
+  chatIcon.innerHTML = `
+    <div class="chat-zone-marker-content">
+      <i class="fas fa-comments"></i>
+      <span class="chat-zone-count">${zone.userCount}</span>
+    </div>
+  `;
+
+  chatIcon.style.cssText = `
+    position: relative;
+    width: 40px;
+    height: 40px;
+    background: #10b981;
+    border: 2px solid white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+    transition: all 0.2s ease;
+    color: white;
+    font-size: 14px;
+  `;
+
+  console.log('Creating marker with coordinates:', zone.lng, zone.lat);
+
+  const marker = new maplibregl.Marker({
+    element: chatIcon,
+    anchor: "center",
+  })
+    .setLngLat([zone.lng, zone.lat]);
+
+  marker.zoneId = zone.zoneId;
+  marker.userCount = zone.userCount;
+  marker.lat = zone.lat;
+  marker.lng = zone.lng;
+  marker._visible = false; // Start as not visible, will be set when added to map
+
+  console.log('Marker created:', marker);
+
+  // Add hover effects
+  chatIcon.addEventListener("mouseenter", () => {
+    chatIcon.style.transform = "scale(1.1)";
+    chatIcon.style.boxShadow = "0 4px 12px rgba(16, 185, 129, 0.4)";
+  });
+
+  chatIcon.addEventListener("mouseleave", () => {
+    chatIcon.style.transform = "scale(1)";
+    chatIcon.style.boxShadow = "0 2px 8px rgba(16, 185, 129, 0.3)";
+  });
+
+  // Add click handler to join chat
+  chatIcon.addEventListener("click", () => {
+    console.log('Chat marker clicked for zone:', zone.zoneId);
+
+    // Check if this is a private chat marker (starts with 'room_')
+    if (zone.zoneId.startsWith('room_')) {
+      // This is a private chat marker - join it immediately
+      console.log('Joining private chat:', zone.zoneId);
+      joinPrivateChat(zone.zoneId);
+    } else {
+      // This is a regular zone chat
+      // If user is already in a chat, leave it first
+      if (window.currentChat) {
+        leaveChatZone();
+      }
+
+      // Open chat setup modal
+      openChatSetupModal();
+
+      // Optionally center map on the zone
+      if (map) {
+        map.easeTo({
+          center: [zone.lng, zone.lat],
+          zoom: Math.max(map.getZoom(), 12),
+          duration: 500
+        });
+      }
+    }
+  });
+
+  return marker;
+}
+
+// Load all active chat zones
+async function loadChatZones() {
+  try {
+    console.log('Loading chat zones...');
+    const response = await fetch('/api/chat/zones');
+    if (!response.ok) {
+      console.error('Failed to fetch chat zones:', response.status);
+      return;
+    }
+
+    const data = await response.json();
+    const zones = data.zones || [];
+    console.log('Received chat zones:', zones);
+
+    // Clear existing chat zone markers
+    chatZoneMarkers.forEach((m) => {
+      try {
+        m.remove();
+      } catch (_) {}
+    });
+    chatZoneMarkers = [];
+
+    // Create markers for active zones
+    zones.forEach((zone) => {
+      console.log('Creating marker for zone:', zone);
+      // Check if marker already exists for this zone
+      const existingMarker = chatZoneMarkers.find(m => m.zoneId === zone.zoneId);
+
+      if (existingMarker) {
+        // Update existing marker user count
+        existingMarker.userCount = zone.userCount;
+        const countElement = existingMarker.getElement().querySelector('.chat-zone-count');
+        if (countElement) {
+          countElement.textContent = zone.userCount;
+        }
+      } else {
+        // Create new marker
+        const marker = createChatZoneMarker(zone);
+        chatZoneMarkers.push(marker);
+
+        // If map is ready, add marker to map immediately
+        if (map) {
+          console.log('Adding marker to map:', marker);
+          marker.addTo(map);
+          marker._visible = true;
+        } else {
+          console.log('Map not ready, marker will be added later');
+        }
+      }
+    });
+
+    // Remove markers for zones that no longer exist
+    const activeZoneIds = zones.map(z => z.zoneId);
+    const markersToRemove = chatZoneMarkers.filter(m => !activeZoneIds.includes(m.zoneId));
+
+    markersToRemove.forEach(marker => {
+      try {
+        marker.remove();
+      } catch (_) {}
+    });
+
+    chatZoneMarkers = chatZoneMarkers.filter(m => activeZoneIds.includes(m.zoneId));
+
+    console.log(`Loaded ${zones.length} active chat zones, ${chatZoneMarkers.length} markers created`);
+
+    // If no zones found, create a test zone for debugging
+    if (zones.length === 0) {
+      console.log('No active chat zones found, creating test zone for debugging');
+      // This is just for debugging - remove in production
+      const testZone = {
+        zoneId: '23.6_-102.5',
+        lat: 23.6,
+        lng: -102.5,
+        userCount: 1
+      };
+
+      const testMarker = createChatZoneMarker(testZone);
+      chatZoneMarkers.push(testMarker);
+
+      if (map) {
+        testMarker.addTo(map);
+        testMarker._visible = true;
+        console.log('Added test marker to map');
+      }
+    }
+
+  } catch (error) {
+    console.error('Error loading chat zones:', error);
+  }
+}
+
+// Update chat zone markers visibility based on zoom and distance
+function updateChatZoneMarkersVisibility() {
+  if (!map) {
+    console.log('Map not ready for visibility update');
+    return;
+  }
+
+  const center = map.getCenter();
+  const cLat = center.lat;
+  const cLng = center.lng;
+  const zoom = map.getZoom();
+
+  console.log('Updating chat zone visibility - zoom:', zoom, 'center:', cLat, cLng);
+
+  // Only show chat zone markers at certain zoom levels
+  const showMarkers = zoom >= 5; // Temporarily lowered for debugging
+  console.log('Show markers based on zoom:', showMarkers);
+
+  chatZoneMarkers.forEach((marker, index) => {
+    const dist = haversineMeters(cLat, cLng, marker.lat, marker.lng);
+    const visible = showMarkers && dist <= PROXIMITY_RADIUS_METERS;
+
+    console.log(`Marker ${index} (${marker.zoneId}): dist=${dist.toFixed(0)}m, visible=${visible}, currently=${marker._visible}`);
+
+    if (visible && !marker._visible) {
+      console.log(`Showing marker ${index}`);
+      marker.addTo(map);
+      marker._visible = true;
+    } else if (!visible && marker._visible) {
+      console.log(`Hiding marker ${index}`);
+      marker.remove();
+      marker._visible = false;
+    }
+  });
+}
+
+// Update specific chat zone marker user count
+function updateChatZoneMarkerCount(zoneId, userCount) {
+  const marker = chatZoneMarkers.find(m => m.zoneId === zoneId);
+  if (marker) {
+    marker.userCount = userCount;
+
+    // Update the count display
+    const countElement = marker.getElement().querySelector('.chat-zone-count');
+    if (countElement) {
+      countElement.textContent = userCount;
+    }
+
+    // Remove marker if no users left
+    if (userCount === 0) {
+      try {
+        marker.remove();
+      } catch (_) {}
+      chatZoneMarkers = chatZoneMarkers.filter(m => m.zoneId !== zoneId);
+    }
+  }
+}
+
 // Initialize export buttons when DOM is ready
 document.addEventListener("DOMContentLoaded", setupExportButtons);
 
@@ -1667,6 +2062,739 @@ function setupDonationModal() {
   });
 }
 
+// Create a new private chat room
+async function createPrivateChat() {
+  try {
+    // Check if user is already in a chat
+    if (window.currentChat || window.currentPrivateChat) {
+      alert('Ya estás en un chat. Sal del chat actual primero.');
+      return;
+    }
+
+    const center = map.getCenter();
+    const position = { lat: center.lat, lng: center.lng };
+
+    // Get user info from localStorage or prompt for it
+    let userInfo = localStorage.getItem('privateChatUserInfo');
+    if (!userInfo) {
+      openPrivateChatSetupModal(null, true); // true = creating new chat
+      return;
+    }
+
+    userInfo = JSON.parse(userInfo);
+
+    // Create private chat room and join immediately
+    const response = await fetch('/api/chat/private/create-and-join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lat: position.lat,
+        lng: position.lng,
+        username: userInfo.username,
+        gender: userInfo.gender
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create private chat');
+    }
+
+    const data = await response.json();
+    const chatRoom = data.chatRoom;
+
+    // Create marker for the private chat using existing chat zone marker system
+    const marker = createChatZoneMarker({
+      zoneId: chatRoom.id,
+      lat: chatRoom.lat,
+      lng: chatRoom.lng,
+      userCount: 1
+    });
+
+    // Override the click handler for private chat
+    const markerElement = marker.getElement();
+    markerElement.addEventListener("click", () => {
+      console.log('Private chat marker clicked for room:', chatRoom.id);
+      joinPrivateChat(chatRoom.id);
+    });
+
+    chatZoneMarkers.push(marker);
+
+    // Add marker to map
+    marker.addTo(map);
+    marker._visible = true;
+
+    // Open chat interface for creator
+    startPrivateChat(data.chatSession, userInfo);
+
+    console.log('Created and joined private chat room:', chatRoom.id);
+
+  } catch (error) {
+    console.error('Error creating private chat:', error);
+    alert('Error al crear chat privado. Inténtalo de nuevo.');
+  }
+}
+
+
+// Join private chat room
+async function joinPrivateChat(chatRoomId) {
+  try {
+    // Check if user is already in a chat
+    if (window.currentChat || window.currentPrivateChat) {
+      alert('Ya estás en un chat. Sal del chat actual primero.');
+      return;
+    }
+
+    // Get user info from localStorage or prompt for it
+    let userInfo = localStorage.getItem('privateChatUserInfo');
+    if (!userInfo) {
+      // Use same modal as zone chat but for private chat
+      openPrivateChatSetupModal(chatRoomId);
+      return;
+    }
+
+    userInfo = JSON.parse(userInfo);
+
+    // Join the private chat
+    const response = await fetch('/api/chat/private/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatRoomId,
+        username: userInfo.username,
+        gender: userInfo.gender
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to join private chat');
+    }
+
+    const data = await response.json();
+
+    // Remove marker immediately when joining
+    const markerIndex = chatZoneMarkers.findIndex(m => m.zoneId === chatRoomId);
+    if (markerIndex !== -1) {
+      const marker = chatZoneMarkers[markerIndex];
+      marker.remove();
+      chatZoneMarkers.splice(markerIndex, 1);
+    }
+
+    // Start private chat
+    startPrivateChat(data.chatSession, userInfo);
+
+  } catch (error) {
+    console.error('Error joining private chat:', error);
+    alert('Error al unirse al chat privado: ' + error.message);
+  }
+}
+
+
+// Start private chat between two users
+function startPrivateChat(chatSession, userInfo) {
+  const isWaiting = chatSession.status === 'waiting';
+  const welcomeMessage = isWaiting
+    ? '<p>¡Chat privado creado!</p><p>Esperando a que alguien se conecte...</p>'
+    : '<p>¡Chat privado iniciado!</p><p>Conectando con el otro usuario...</p>';
+
+  // Create private chat interface
+  const chatHTML = `
+    <div id="private-chat-panel" class="private-chat-panel">
+      <div class="chat-header">
+        <div class="chat-zone-info">
+          <i class="fas fa-lock"></i>
+          <span>Chat Privado</span>
+        </div>
+        <div class="chat-user-info">
+          <span class="chat-username">${userInfo.username}</span>
+          <span class="chat-gender">${userInfo.gender === 'M' ? '♂️' : '♀️'}</span>
+        </div>
+        <button id="private-chat-close" class="chat-close-btn" title="Salir del chat">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="chat-messages" id="private-chat-messages">
+        <div class="chat-welcome">
+          ${welcomeMessage}
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <input
+          type="text"
+          id="private-chat-input"
+          placeholder="Escribe un mensaje..."
+          maxlength="200"
+          autocomplete="off"
+        />
+        <button id="private-chat-send" class="chat-send-btn">
+          <i class="fas fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add chat panel to body
+  document.body.insertAdjacentHTML('beforeend', chatHTML);
+
+  // Get chat elements
+  const chatPanel = document.getElementById("private-chat-panel");
+  const chatInput = document.getElementById("private-chat-input");
+  const chatSend = document.getElementById("private-chat-send");
+  const chatClose = document.getElementById("private-chat-close");
+  const chatMessages = document.getElementById("private-chat-messages");
+
+  // Show chat panel with animation
+  setTimeout(() => {
+    chatPanel.classList.add('show');
+  }, 100);
+
+  // Focus on input
+  setTimeout(() => chatInput.focus(), 300);
+
+  // Event listeners
+  chatClose.addEventListener("click", () => {
+    leavePrivateChat(chatSession.id);
+  });
+
+  chatSend.addEventListener("click", () => {
+    sendPrivateChatMessage(chatSession.id);
+  });
+
+  chatInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      sendPrivateChatMessage(chatSession.id);
+    }
+  });
+
+  // Store references
+  window.currentPrivateChat = {
+    sessionId: chatSession.id,
+    panel: chatPanel,
+    input: chatInput,
+    messages: chatMessages,
+    userInfo,
+    displayedMessageIds: new Set(),
+    isWaiting: isWaiting
+  };
+
+  // Start polling for messages
+  startPrivateChatMessagePolling(chatSession.id, userInfo);
+}
+
+// Send private chat message
+async function sendPrivateChatMessage(sessionId) {
+  if (!window.currentPrivateChat) return;
+
+  const { input, userInfo } = window.currentPrivateChat;
+  const message = input.value.trim();
+
+  if (!message) return;
+
+  try {
+    const response = await fetch('/api/chat/private/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        username: userInfo.username,
+        gender: userInfo.gender,
+        message
+      })
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        // Session has ended
+        handlePrivateChatEnded('El chat ha terminado.');
+        return;
+      }
+      throw new Error('Failed to send message');
+    }
+
+    // Clear input
+    input.value = '';
+
+    // Add message locally
+    addPrivateChatMessage({
+      id: `temp_${userInfo.username}_${message}_${Date.now()}`,
+      username: userInfo.username,
+      gender: userInfo.gender,
+      message,
+      timestamp: new Date().toISOString(),
+      isOwn: true
+    });
+
+  } catch (error) {
+    console.error('Error sending private message:', error);
+    if (error.message.includes('fetch') || error.name === 'TypeError') {
+      handlePrivateChatEnded('Error de conexión. El chat puede haber terminado.');
+    } else {
+      alert('Error al enviar mensaje.');
+    }
+  }
+}
+
+// Add message to private chat
+function addPrivateChatMessage(msg) {
+  if (!window.currentPrivateChat) return;
+
+  const { messages, displayedMessageIds } = window.currentPrivateChat;
+
+  // Check for duplicates
+  const messageId = msg.id || `${msg.username}_${msg.timestamp}_${msg.message}`;
+  if (displayedMessageIds.has(messageId)) {
+    return;
+  }
+
+  displayedMessageIds.add(messageId);
+
+  const messageEl = document.createElement('div');
+  messageEl.className = `chat-message ${msg.isOwn ? 'own' : 'other'}`;
+
+  const time = new Date(msg.timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const displayName = msg.isOwn ? 'Tú' : msg.username;
+
+  messageEl.innerHTML = `
+    <div class="message-header">
+      <span class="message-username">${displayName}</span>
+      <span class="message-gender">${msg.gender === 'M' ? '♂️' : '♀️'}</span>
+      <span class="message-time">${time}</span>
+    </div>
+    <div class="message-text">${escapeHtml(msg.message)}</div>
+  `;
+
+  messages.appendChild(messageEl);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// Start polling for private chat messages
+function startPrivateChatMessagePolling(sessionId, userInfo) {
+  if (window.privateChatPollingInterval) {
+    clearInterval(window.privateChatPollingInterval);
+  }
+
+  window.privateChatPollingInterval = setInterval(async () => {
+    if (!window.currentPrivateChat) {
+      clearInterval(window.privateChatPollingInterval);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/chat/private/messages/${sessionId}`);
+      if (!response.ok) {
+        // If session not found or ended, the chat has ended
+        if (response.status === 404) {
+          const errorData = await response.json().catch(() => ({}));
+          if (errorData.ended) {
+            handlePrivateChatEnded('El chat ha terminado porque el otro usuario se desconectó.');
+          } else {
+            handlePrivateChatEnded('El chat ha terminado.');
+          }
+        }
+        return;
+      }
+
+      const data = await response.json();
+
+      // Check if session is still active
+      if (!data.active) {
+        handlePrivateChatEnded('El chat ha terminado.');
+        return;
+      }
+
+      const messages = data.messages || [];
+
+      // Check if we were waiting and now have a second user
+      if (window.currentPrivateChat.isWaiting && messages.length > 0) {
+        // Update welcome message
+        const welcomeDiv = window.currentPrivateChat.messages.querySelector('.chat-welcome');
+        if (welcomeDiv) {
+          welcomeDiv.innerHTML = '<p>¡Usuario conectado!</p><p>Ya pueden chatear...</p>';
+        }
+        window.currentPrivateChat.isWaiting = false;
+      }
+
+      // Add new messages
+      messages.forEach(msg => {
+        const isOwn = msg.username === userInfo.username;
+        const messageId = msg.id || `${msg.username}_${msg.timestamp}_${msg.message}`;
+
+        if (!window.currentPrivateChat.displayedMessageIds.has(messageId)) {
+          window.currentPrivateChat.displayedMessageIds.add(messageId);
+          addPrivateChatMessage({
+            id: messageId,
+            username: msg.username,
+            gender: msg.gender,
+            message: msg.message,
+            timestamp: msg.timestamp,
+            isOwn
+          });
+        }
+      });
+
+    } catch (error) {
+      console.error('Error polling private messages:', error);
+      // If network error persists, assume chat ended
+      if (error.name === 'TypeError' || error.message.includes('fetch')) {
+        handlePrivateChatEnded('Error de conexión. El chat puede haber terminado.');
+      }
+    }
+  }, 2000); // Poll every 2 seconds
+}
+
+// Handle private chat ended
+function handlePrivateChatEnded(reason) {
+  if (!window.currentPrivateChat) return;
+
+  const { panel } = window.currentPrivateChat;
+
+  // Stop polling
+  if (window.privateChatPollingInterval) {
+    clearInterval(window.privateChatPollingInterval);
+    window.privateChatPollingInterval = null;
+  }
+
+  // Add system message
+  addPrivateChatMessage({
+    username: 'Sistema',
+    gender: 'N',
+    message: reason,
+    timestamp: new Date().toISOString(),
+    isOwn: false
+  });
+
+  // Auto-leave after a delay
+  setTimeout(() => {
+    if (window.currentPrivateChat) {
+      leavePrivateChat(window.currentPrivateChat.sessionId);
+    }
+  }, 3000);
+
+  console.log('Private chat ended:', reason);
+}
+
+// Leave private chat
+async function leavePrivateChat(sessionId) {
+  if (!window.currentPrivateChat) return;
+
+  const { panel } = window.currentPrivateChat;
+
+  try {
+    // Notify server
+    await fetch('/api/chat/private/leave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId })
+    });
+  } catch (error) {
+    console.error('Error leaving private chat:', error);
+  }
+
+  // Stop polling
+  if (window.privateChatPollingInterval) {
+    clearInterval(window.privateChatPollingInterval);
+    window.privateChatPollingInterval = null;
+  }
+
+  // Remove chat panel
+  panel.classList.remove('show');
+  setTimeout(() => {
+    panel.remove();
+  }, 300);
+
+  // Clear data
+  if (window.currentPrivateChat && window.currentPrivateChat.displayedMessageIds) {
+    window.currentPrivateChat.displayedMessageIds.clear();
+  }
+  window.currentPrivateChat = null;
+
+  console.log('Left private chat');
+}
+
+// Open private chat setup modal
+function openPrivateChatSetupModal(chatRoomId, isCreating = false) {
+  const modalTitle = isCreating ? 'Crear Chat Privado' : 'Unirse al Chat Privado';
+  const modalDescription = isCreating
+    ? 'Estás creando un chat privado. Espera a que alguien se conecte.'
+    : 'Estás a punto de unirte a un chat privado. Solo tú y la otra persona podrán ver los mensajes.';
+  const buttonText = isCreating ? 'Crear chat' : 'Unirme al chat';
+
+  const savedUserData = localStorage.getItem('privateChatUserData');
+  let savedUsername = '';
+  let savedGender = '';
+
+  if (savedUserData) {
+    try {
+      const userData = JSON.parse(savedUserData);
+      savedUsername = userData.username || '';
+      savedGender = userData.gender || '';
+    } catch (error) {
+      console.error('Error parsing saved private chat user data:', error);
+    }
+  }
+
+  const modalHTML = `
+    <div id="private-chat-setup-modal" class="chat-setup-modal">
+      <div class="chat-setup-modal-content">
+        <div class="chat-setup-modal-header">
+          <h2>${modalTitle}</h2>
+          <button id="private-chat-setup-modal-close" class="chat-setup-modal-close">&times;</button>
+        </div>
+        <div class="chat-setup-modal-body">
+          <p class="chat-setup-description">
+            ${modalDescription}
+          </p>
+
+          <div class="chat-setup-form">
+            <div class="form-group">
+              <label for="private-chat-username">Nombre de usuario:</label>
+              <input
+                type="text"
+                id="private-chat-username"
+                placeholder="Tu nombre o alias"
+                maxlength="20"
+                autocomplete="off"
+                value="${savedUsername}"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Género:</label>
+              <div class="gender-options">
+                <label class="gender-option">
+                  <input type="radio" name="private-gender" value="M" ${savedGender === 'M' ? 'checked' : ''} required />
+                  <span class="gender-label">Masculino</span>
+                </label>
+                <label class="gender-option">
+                  <input type="radio" name="private-gender" value="F" ${savedGender === 'F' ? 'checked' : ''} required />
+                  <span class="gender-label">Femenino</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="chat-setup-actions">
+              <button id="private-chat-setup-cancel" class="chat-setup-btn cancel">Cancelar</button>
+              <button id="private-chat-setup-join" class="chat-setup-btn primary">${buttonText}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+  const modal = document.getElementById("private-chat-setup-modal");
+  const closeBtn = document.getElementById("private-chat-setup-modal-close");
+  const cancelBtn = document.getElementById("private-chat-setup-cancel");
+  const joinBtn = document.getElementById("private-chat-setup-join");
+  const usernameInput = document.getElementById("private-chat-username");
+
+  setTimeout(() => {
+    modal.classList.add('show');
+    if (savedUsername) {
+      joinBtn.focus();
+    } else {
+      usernameInput.focus();
+    }
+  }, 100);
+
+  const closeModal = () => {
+    modal.remove();
+  };
+
+  closeBtn.addEventListener("click", closeModal);
+  cancelBtn.addEventListener("click", closeModal);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeModal();
+    }
+  });
+
+  joinBtn.addEventListener("click", () => {
+    const username = usernameInput.value.trim();
+    const gender = document.querySelector('input[name="private-gender"]:checked')?.value;
+
+    if (!username) {
+      alert("Por favor ingresa un nombre de usuario");
+      usernameInput.focus();
+      return;
+    }
+
+    if (!gender) {
+      alert("Por favor selecciona tu género");
+      return;
+    }
+
+    // Save user data
+    const userData = { username, gender };
+    localStorage.setItem('privateChatUserData', JSON.stringify(userData));
+    localStorage.setItem('privateChatUserInfo', JSON.stringify(userData));
+
+    if (isCreating) {
+      // Create new chat
+      createPrivateChat();
+    } else {
+      // Join existing chat
+      joinPrivateChat(chatRoomId);
+    }
+    closeModal();
+  });
+}
+
+// Open chat setup modal for username and gender selection
+function openChatSetupModal() {
+  console.log('Opening chat setup modal');
+
+  // Load saved user data from localStorage
+  const savedUserData = localStorage.getItem('chatUserData');
+  let savedUsername = '';
+  let savedGender = '';
+
+  if (savedUserData) {
+    try {
+      const userData = JSON.parse(savedUserData);
+      savedUsername = userData.username || '';
+      savedGender = userData.gender || '';
+    } catch (error) {
+      console.error('Error parsing saved user data:', error);
+    }
+  }
+
+  // Create modal HTML
+  const modalHTML = `
+    <div id="chat-setup-modal" class="chat-setup-modal">
+      <div class="chat-setup-modal-content">
+        <div class="chat-setup-modal-header">
+          <h2>Chatear en esta zona</h2>
+          <button id="chat-setup-modal-close" class="chat-setup-modal-close">&times;</button>
+        </div>
+        <div class="chat-setup-modal-body">
+          <p class="chat-setup-description">
+            Únete al chat grupal de esta área. Todas las personas que estén en esta zona podrán verte y chatear contigo.
+          </p>
+
+          <div class="chat-setup-form">
+            <div class="form-group">
+              <label for="chat-username">Nombre de usuario:</label>
+              <input
+                type="text"
+                id="chat-username"
+                placeholder="Tu nombre o alias"
+                maxlength="20"
+                autocomplete="off"
+                value="${savedUsername}"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Género:</label>
+              <div class="gender-options">
+                <label class="gender-option">
+                  <input type="radio" name="gender" value="M" ${savedGender === 'M' ? 'checked' : ''} required />
+                  <span class="gender-label">Masculino</span>
+                </label>
+                <label class="gender-option">
+                  <input type="radio" name="gender" value="F" ${savedGender === 'F' ? 'checked' : ''} required />
+                  <span class="gender-label">Femenino</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="chat-setup-actions">
+              <button id="chat-setup-cancel" class="chat-setup-btn cancel">Cancelar</button>
+              <button id="chat-setup-join" class="chat-setup-btn primary">Unirme al chat</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Add modal to body
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+  // Get modal elements
+  const modal = document.getElementById("chat-setup-modal");
+
+  // Show modal
+  setTimeout(() => {
+    modal.classList.add('show');
+  }, 100);
+  const closeBtn = document.getElementById("chat-setup-modal-close");
+  const cancelBtn = document.getElementById("chat-setup-cancel");
+  const joinBtn = document.getElementById("chat-setup-join");
+  const usernameInput = document.getElementById("chat-username");
+
+  // Focus on username input if no saved data, otherwise focus on join button
+  setTimeout(() => {
+    if (savedUsername) {
+      joinBtn.focus();
+    } else {
+      usernameInput.focus();
+    }
+  }, 100);
+
+  // Close modal functions
+  const closeModal = () => {
+    modal.remove();
+  };
+
+  // Event listeners
+  closeBtn.addEventListener("click", closeModal);
+  cancelBtn.addEventListener("click", closeModal);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeModal();
+    }
+  });
+
+  // Join chat function
+  joinBtn.addEventListener("click", () => {
+    const username = usernameInput.value.trim();
+    const gender = document.querySelector('input[name="gender"]:checked')?.value;
+
+    if (!username) {
+      alert("Por favor ingresa un nombre de usuario");
+      usernameInput.focus();
+      return;
+    }
+
+    if (!gender) {
+      alert("Por favor selecciona tu género");
+      return;
+    }
+
+    // Save user data to localStorage
+    const userData = { username, gender };
+    localStorage.setItem('chatUserData', JSON.stringify(userData));
+
+    // Join the chat
+    joinChatZone(username, gender);
+    closeModal();
+  });
+}
+
 // Load and update donation progress
 async function loadDonationProgress() {
   try {
@@ -1698,5 +2826,722 @@ async function loadDonationProgress() {
     }
   } catch (error) {
     console.error("Error loading donation progress:", error);
+  }
+}
+
+// Join chat zone with username and gender
+async function joinChatZone(username, gender) {
+  try {
+    // Get current map bounds to determine the chat zone
+    const bounds = map.getBounds();
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+
+    // Create zone identifier based on current view (rounded to larger grid for better matching)
+    // Round to 0.5 degrees (~55km) for much larger zones and ignore zoom level for broader matching
+    const zoneId = `${center.lat.toFixed(1)}_${center.lng.toFixed(1)}`;
+
+    // Join via API
+    console.log('Joining chat zone:', zoneId);
+    const response = await fetch('/api/chat/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, gender, zoneId })
+    });
+
+    console.log('Join response status:', response.status);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Join error:', errorText);
+      throw new Error('Failed to join chat zone');
+    }
+
+    const data = await response.json();
+    console.log('Join response data:', data);
+
+    // Store user info in localStorage for persistence
+    const userInfo = {
+      userId: data.userId,
+      username,
+      gender,
+      zoneId,
+      joinedAt: new Date().toISOString()
+    };
+    localStorage.setItem('chatUserInfo', JSON.stringify(userInfo));
+
+    // Open chat interface
+    openChatInterface(userInfo);
+
+    // Update chat zone marker count
+    updateChatZoneMarkerCount(zoneId, data.usersInZone.length);
+
+    // Change button to indicate active chat
+    if (chatZoneButton) {
+      chatZoneButton.innerHTML = '<i class="fas fa-comments"></i>';
+      chatZoneButton.classList.add('active');
+      chatZoneButton.title = `Chateando como ${username} - Haz clic para salir`;
+    }
+
+    // Load existing messages (limit to 5 initially)
+    loadChatMessages(userInfo, 5);
+
+    // Start polling for new messages
+    startMessagePolling(userInfo);
+
+    // Start polling for user count updates
+    startUserCountPolling(userInfo);
+
+    console.log(`Joined chat zone: ${zoneId} as ${username} (${gender})`);
+
+  } catch (error) {
+    console.error('Error joining chat zone:', error);
+    alert('Error al unirse al chat. Inténtalo de nuevo.');
+  }
+}
+
+// Open chat interface
+function openChatInterface(userInfo) {
+  // Create chat panel HTML
+  const chatHTML = `
+    <div id="chat-panel" class="chat-panel">
+      <div class="chat-header">
+        <div class="chat-zone-info">
+          <i class="fas fa-map-marker-alt"></i>
+          <span>Chat de zona</span>
+        </div>
+        <div class="chat-user-info">
+          <span class="chat-username">${userInfo.username}</span>
+          <span class="chat-gender">${userInfo.gender === 'M' ? '♂️' : '♀️'}</span>
+        </div>
+        <button id="chat-close" class="chat-close-btn" title="Salir del chat">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-welcome">
+          <p>¡Bienvenido al chat de esta zona!</p>
+          <p>Conectando con otras personas...</p>
+        </div>
+        <div class="load-more-messages" id="load-more-messages" style="display: none;">
+          <button class="load-more-btn" id="load-more-btn">Cargar más mensajes</button>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <input
+          type="text"
+          id="chat-input"
+          placeholder="Escribe un mensaje..."
+          maxlength="200"
+          autocomplete="off"
+        />
+        <button id="chat-send" class="chat-send-btn">
+          <i class="fas fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add chat panel to body
+  document.body.insertAdjacentHTML('beforeend', chatHTML);
+
+  // Get chat elements
+  const chatPanel = document.getElementById("chat-panel");
+  const chatInput = document.getElementById("chat-input");
+  const chatSend = document.getElementById("chat-send");
+  const chatClose = document.getElementById("chat-close");
+  const chatMessages = document.getElementById("chat-messages");
+  const loadMoreMessages = document.getElementById("load-more-messages");
+  const loadMoreBtn = document.getElementById("load-more-btn");
+
+  // Show chat panel with animation
+  setTimeout(() => {
+    chatPanel.classList.add('show');
+  }, 100);
+
+  // Focus on input
+  setTimeout(() => chatInput.focus(), 300);
+
+  // Event listeners
+  chatClose.addEventListener("click", () => {
+    leaveChatZone();
+  });
+
+  chatSend.addEventListener("click", () => {
+    sendChatMessage();
+  });
+
+  chatInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      sendChatMessage();
+    }
+  });
+
+  // Load more messages functionality
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener("click", async () => {
+      if (!window.currentChat) return;
+
+      const { userInfo } = window.currentChat;
+      const currentLoaded = window.currentChat.loadedMessages || 0;
+
+      // Load next batch of messages (20 more)
+      await loadChatMessages(userInfo, currentLoaded + 20);
+
+      // Update load more button visibility
+      updateLoadMoreButtonVisibility();
+    });
+  }
+
+  // Store references for later use
+  window.currentChat = {
+    userInfo,
+    panel: chatPanel,
+    input: chatInput,
+    messages: chatMessages,
+    loadMoreMessages,
+    displayedMessageIds: new Set() // Track displayed message IDs to prevent duplicates
+  };
+}
+
+// Send chat message
+async function sendChatMessage() {
+  if (!window.currentChat) return;
+
+  const { input, userInfo } = window.currentChat;
+  const message = input.value.trim();
+
+  if (!message) return;
+
+  try {
+    console.log('Sending message:', message);
+    // Send message to server
+    const response = await fetch('/api/chat/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userInfo.userId,
+        zoneId: userInfo.zoneId,
+        message
+      })
+    });
+
+    console.log('Send message response status:', response.status);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Send message error:', errorText);
+      throw new Error('Failed to send message');
+    }
+
+    // Clear input immediately for better UX
+    input.value = '';
+
+    // Add message to chat locally after a small delay to let server respond first
+    setTimeout(() => {
+      const tempTimestamp = new Date().toISOString();
+      addChatMessage({
+        id: `temp_${userInfo.username}_${message}_${Date.now()}`,
+        username: userInfo.username,
+        gender: userInfo.gender,
+        message,
+        timestamp: tempTimestamp,
+        isOwn: true
+      });
+    }, 100);
+
+  } catch (error) {
+    console.error('Error sending message:', error);
+    alert('Error al enviar mensaje. Inténtalo de nuevo.');
+  }
+}
+
+// Add message to chat
+function addChatMessage(msg) {
+  if (!window.currentChat) return;
+
+  const { messages, displayedMessageIds } = window.currentChat;
+
+  // Check for duplicate messages using multiple strategies
+  const messageId = msg.id || `${msg.username}_${msg.timestamp}_${msg.message}`;
+
+  // Also check for content-based duplicates (for messages sent by current user)
+  const contentKey = `${msg.username}_${msg.message}_${new Date(msg.timestamp).getTime()}`;
+  const tempContentKey = `temp_${msg.username}_${msg.message}`;
+
+  if (displayedMessageIds.has(messageId) ||
+      displayedMessageIds.has(contentKey) ||
+      displayedMessageIds.has(tempContentKey)) {
+    console.log('Skipping duplicate message:', messageId);
+    return;
+  }
+
+  // Mark this message as displayed with multiple keys to prevent duplicates
+  displayedMessageIds.add(messageId);
+  displayedMessageIds.add(contentKey);
+  if (msg.isOwn) {
+    displayedMessageIds.add(tempContentKey);
+  }
+
+  const messageEl = document.createElement('div');
+  messageEl.className = `chat-message ${msg.isOwn ? 'own' : 'other'}`;
+
+  const time = new Date(msg.timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  // For own messages, show "Tú" instead of username
+  const displayName = msg.isOwn ? 'Tú' : msg.username;
+
+  messageEl.innerHTML = `
+    <div class="message-header">
+      <span class="message-username">${displayName}</span>
+      <span class="message-gender">${msg.gender === 'M' ? '♂️' : '♀️'}</span>
+      <span class="message-time">${time}</span>
+    </div>
+    <div class="message-text">${escapeHtml(msg.message)}</div>
+  `;
+
+  messages.appendChild(messageEl);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// Load existing chat messages
+async function loadChatMessages(userInfo, limit = 5) {
+  try {
+    const response = await fetch(`/api/chat/messages/${userInfo.zoneId}?userId=${userInfo.userId}&limit=${limit}`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const messages = data.messages || [];
+
+    // Add messages to chat (identify which ones are from current user)
+    messages.forEach(msg => {
+      const isOwn = msg.userId === userInfo.userId;
+      const messageId = msg.id || `${msg.username}_${msg.timestamp}_${msg.message}`;
+      const contentKey = `${msg.username}_${msg.message}_${new Date(msg.timestamp).getTime()}`;
+
+      // Mark these as displayed to prevent duplicates
+      if (!window.currentChat.displayedMessageIds.has(messageId)) {
+        window.currentChat.displayedMessageIds.add(messageId);
+        window.currentChat.displayedMessageIds.add(contentKey);
+      }
+
+      addChatMessage({
+        id: messageId,
+        username: msg.username,
+        gender: msg.gender,
+        message: msg.message,
+        timestamp: msg.timestamp,
+        isOwn: isOwn
+      });
+    });
+
+    // Set the last message time to the most recent message to prevent duplicates in polling
+    if (messages.length > 0 && window.currentChat) {
+      const latestMessage = messages.reduce((latest, msg) => {
+        const msgTime = new Date(msg.timestamp).getTime();
+        const latestTime = new Date(latest.timestamp).getTime();
+        return msgTime > latestTime ? msg : latest;
+      });
+      window.currentChat.lastMessageTime = new Date(latestMessage.timestamp).getTime();
+      console.log('Set last message time to:', new Date(window.currentChat.lastMessageTime));
+    }
+
+    // Store pagination info for loading more messages
+    if (window.currentChat) {
+      window.currentChat.totalMessages = data.total || messages.length;
+      window.currentChat.loadedMessages = messages.length;
+      window.currentChat.hasMoreMessages = data.hasMore || false;
+    }
+
+    // Update load more button visibility
+    updateLoadMoreButtonVisibility();
+
+  } catch (error) {
+    console.error('Error loading chat messages:', error);
+  }
+}
+
+// Start polling for new messages
+function startMessagePolling(userInfo) {
+  if (window.messagePollingInterval) {
+    clearInterval(window.messagePollingInterval);
+  }
+
+  // Initialize last message time if not set
+  if (!window.currentChat.lastMessageTime) {
+    window.currentChat.lastMessageTime = Date.now();
+  }
+
+  // Add a small random delay to prevent all clients from polling at the same time
+  const pollDelay = Math.random() * 1000; // 0-1 second random delay
+
+  setTimeout(() => {
+    window.messagePollingInterval = setInterval(async () => {
+      if (!window.currentChat) {
+        clearInterval(window.messagePollingInterval);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/chat/messages/${userInfo.zoneId}?userId=${userInfo.userId}`);
+        if (!response.ok) {
+          console.error('Message polling failed:', response.status);
+          return;
+        }
+
+        const data = await response.json();
+        const messages = data.messages || [];
+
+        // Get the last message timestamp we have
+        const lastMessageTime = window.currentChat.lastMessageTime || 0;
+
+        // Filter and add only new messages (not already displayed)
+        const newMessages = messages.filter(msg => {
+          const msgTime = new Date(msg.timestamp).getTime();
+          const messageId = msg.id || `${msg.username}_${msg.timestamp}_${msg.message}`;
+          const contentKey = `${msg.username}_${msg.message}_${msgTime}`;
+          const isNew = msgTime > lastMessageTime;
+          const notDisplayed = !window.currentChat.displayedMessageIds.has(messageId) &&
+                              !window.currentChat.displayedMessageIds.has(contentKey);
+
+          return isNew && notDisplayed;
+        });
+
+        // Add new messages in chronological order
+        newMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        newMessages.forEach(msg => {
+          const isOwn = msg.userId === userInfo.userId;
+          console.log('Adding new polled message from', msg.username, ':', msg.message, isOwn ? '(own)' : '(other)');
+          addChatMessage({
+            id: msg.id,
+            username: msg.username,
+            gender: msg.gender,
+            message: msg.message,
+            timestamp: msg.timestamp,
+            isOwn: isOwn
+          });
+        });
+
+        // Update last message time to the latest message we received
+        if (messages.length > 0) {
+          // Find the most recent message timestamp
+          const latestMessage = messages.reduce((latest, msg) => {
+            const msgTime = new Date(msg.timestamp).getTime();
+            const latestTime = new Date(latest.timestamp).getTime();
+            return msgTime > latestTime ? msg : latest;
+          });
+          window.currentChat.lastMessageTime = new Date(latestMessage.timestamp).getTime();
+        }
+
+        // Clean up old message IDs to prevent memory leaks (keep only last 100)
+        if (window.currentChat.displayedMessageIds.size > 100) {
+          const idsArray = Array.from(window.currentChat.displayedMessageIds);
+          const keepIds = idsArray.slice(-50); // Keep last 50
+          window.currentChat.displayedMessageIds = new Set(keepIds);
+        }
+
+      } catch (error) {
+        console.error('Error polling messages:', error);
+      }
+    }, 3000); // Poll every 3 seconds
+  }, pollDelay);
+}
+
+// Start polling for user count updates
+function startUserCountPolling(userInfo) {
+  if (window.userCountPollingInterval) {
+    clearInterval(window.userCountPollingInterval);
+  }
+
+  window.userCountPollingInterval = setInterval(async () => {
+    if (!window.currentChat) {
+      clearInterval(window.userCountPollingInterval);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/chat/users/${userInfo.zoneId}`);
+      if (!response.ok) return;
+
+      const data = await response.json();
+      updateUserCount(data.count);
+
+    } catch (error) {
+      console.error('Error polling user count:', error);
+    }
+  }, 10000); // Poll every 10 seconds
+}
+
+// Update user count in chat header
+function updateUserCount(count) {
+  if (!window.currentChat) return;
+
+  const { panel } = window.currentChat;
+  const header = panel.querySelector('.chat-header');
+  const zoneInfo = header.querySelector('.chat-zone-info');
+
+  // Update the zone info to show user count
+  zoneInfo.innerHTML = `
+    <i class="fas fa-map-marker-alt"></i>
+    <span>Chat de zona (${count} usuarios en línea)</span>
+  `;
+}
+
+// Leave chat zone
+async function leaveChatZone() {
+  if (!window.currentChat) return;
+
+  const { panel, userInfo } = window.currentChat;
+
+  try {
+    // Leave via API
+    await fetch('/api/chat/leave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userInfo.userId,
+        zoneId: userInfo.zoneId
+      })
+    });
+  } catch (error) {
+    console.error('Error leaving chat zone:', error);
+  }
+
+  // Stop message polling
+  if (window.messagePollingInterval) {
+    clearInterval(window.messagePollingInterval);
+    window.messagePollingInterval = null;
+  }
+
+  // Stop user count polling
+  if (window.userCountPollingInterval) {
+    clearInterval(window.userCountPollingInterval);
+    window.userCountPollingInterval = null;
+  }
+
+  // Remove chat panel
+  panel.classList.remove('show');
+  setTimeout(() => {
+    panel.remove();
+  }, 300);
+
+  // Update chat zone marker count
+  if (userInfo && userInfo.zoneId) {
+    // Get updated user count for the zone
+    try {
+      const response = await fetch(`/api/chat/users/${userInfo.zoneId}`);
+      if (response.ok) {
+        const data = await response.json();
+        updateChatZoneMarkerCount(userInfo.zoneId, data.count);
+      }
+    } catch (error) {
+      console.error('Error updating chat zone marker count:', error);
+    }
+  }
+
+  // Clear user info
+  localStorage.removeItem('chatUserInfo');
+  if (window.currentChat && window.currentChat.displayedMessageIds) {
+    window.currentChat.displayedMessageIds.clear();
+  }
+  window.currentChat = null;
+
+  // Reset button
+  if (chatZoneButton) {
+    chatZoneButton.innerHTML = '<i class="fas fa-comments"></i>';
+    chatZoneButton.classList.remove('active');
+    chatZoneButton.title = 'Chatear en esta zona (zoom mínimo: 14)';
+  }
+
+  console.log('Left chat zone');
+}
+
+// Check if user is still in their chat zone
+function checkChatZoneProximity() {
+  if (!window.currentChat) return;
+
+  const userInfo = window.currentChat.userInfo;
+  const currentCenter = map.getCenter();
+  const currentZoom = map.getZoom();
+
+  // Calculate current zone
+  const currentZoneId = `${currentCenter.lat.toFixed(1)}_${currentCenter.lng.toFixed(1)}`;
+
+  // Check if user moved to a different zone
+  if (currentZoneId !== userInfo.zoneId) {
+    console.log('User moved away from chat zone, disconnecting...');
+
+    // Add system message
+    addChatMessage({
+      username: 'Sistema',
+      gender: 'N',
+      message: 'Te has alejado de la zona de chat. Desconectando...',
+      timestamp: new Date().toISOString(),
+      isOwn: false
+    });
+
+    // Disconnect after a short delay
+    setTimeout(() => {
+      leaveChatZone();
+    }, 2000);
+  }
+}
+
+// Check for nearby active chats
+async function checkNearbyChats() {
+  if (!chatZoneButton || !map) return;
+
+  try {
+    const center = map.getCenter();
+    const zoneId = `${center.lat.toFixed(1)}_${center.lng.toFixed(1)}`;
+
+    const response = await fetch(`/api/chat/users/${zoneId}`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const userCount = data.count || 0;
+
+    // Update button appearance based on user count
+    updateChatButtonForUsers(userCount);
+
+  } catch (error) {
+    console.error('Error checking nearby chats:', error);
+  }
+}
+
+// Update chat button appearance based on user count
+function updateChatButtonForUsers(userCount) {
+  if (!chatZoneButton) return;
+
+  if (userCount > 1) {
+    // Active chat with multiple users
+    chatZoneButton.classList.add('has-users');
+    chatZoneButton.title = `Chatear en esta zona (${userCount} usuarios en línea)`;
+  } else if (userCount === 1) {
+    // Only current user
+    chatZoneButton.classList.remove('has-users');
+    chatZoneButton.title = 'Chatear en esta zona (solo tú)';
+  } else {
+    // No users
+    chatZoneButton.classList.remove('has-users');
+    chatZoneButton.title = 'Chatear en esta zona (sin usuarios)';
+  }
+}
+
+// Start periodic chat zones refresh
+function startChatZonesRefresh() {
+  // Refresh chat zones every 30 seconds
+  setInterval(async () => {
+    if (map && map.getZoom() >= 8) { // Only refresh if zoom level allows markers
+      await loadChatZones();
+      // Update visibility after refresh
+      updateChatZoneMarkersVisibility();
+    }
+  }, 30000); // 30 seconds
+}
+
+// Update load more messages button visibility
+function updateLoadMoreButtonVisibility() {
+  if (!window.currentChat || !window.currentChat.loadMoreMessages) return;
+
+  const { loadMoreMessages, hasMoreMessages, loadedMessages, totalMessages } = window.currentChat;
+
+  if (hasMoreMessages && loadedMessages < totalMessages) {
+    loadMoreMessages.style.display = 'block';
+  } else {
+    loadMoreMessages.style.display = 'none';
+  }
+}
+
+// Handle page unload to leave chats
+window.addEventListener('beforeunload', () => {
+  // Leave zone chat if active
+  if (window.currentChat) {
+    // Try to leave synchronously (though it may not complete)
+    navigator.sendBeacon('/api/chat/leave', JSON.stringify({
+      userId: window.currentChat.userInfo.userId,
+      zoneId: window.currentChat.userInfo.zoneId
+    }));
+  }
+
+  // Leave private chat if active
+  if (window.currentPrivateChat) {
+    navigator.sendBeacon('/api/chat/private/leave', JSON.stringify({
+      sessionId: window.currentPrivateChat.sessionId
+    }));
+  }
+});
+
+// Handle visibility change to detect when user switches tabs or minimizes
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // User left the page
+    console.log('User left the page');
+  } else {
+    // User returned to the page
+    console.log('User returned to the page');
+  }
+});
+
+// Restore chat session from localStorage
+function restoreChatSession() {
+  const storedUserInfo = localStorage.getItem('chatUserInfo');
+  if (!storedUserInfo) return;
+
+  try {
+    const userInfo = JSON.parse(storedUserInfo);
+
+    // Check if session is still valid (not too old)
+    const joinedAt = new Date(userInfo.joinedAt);
+    const now = new Date();
+    const hoursSinceJoin = (now - joinedAt) / (1000 * 60 * 60);
+
+    if (hoursSinceJoin > 24) { // Session expires after 24 hours
+      localStorage.removeItem('chatUserInfo');
+      return;
+    }
+
+    // Check if still in the same zone
+    const currentCenter = map.getCenter();
+    const currentZoneId = `${currentCenter.lat.toFixed(1)}_${currentCenter.lng.toFixed(1)}`;
+
+    // Check if in the same zone
+    if (currentZoneId !== userInfo.zoneId) {
+      localStorage.removeItem('chatUserInfo');
+      return;
+    }
+
+    // Restore the chat
+    console.log('Restoring chat session for:', userInfo.username);
+    openChatInterface(userInfo);
+
+    // Update button state
+    if (chatZoneButton) {
+      chatZoneButton.innerHTML = '<i class="fas fa-comments"></i>';
+      chatZoneButton.classList.add('active');
+      chatZoneButton.title = `Chateando como ${userInfo.username} - Haz clic para salir`;
+    }
+
+    // Load existing messages and start polling (limit to 5 initially)
+    loadChatMessages(userInfo, 5);
+    startMessagePolling(userInfo);
+    startUserCountPolling(userInfo);
+
+    // Add welcome back message
+    setTimeout(() => {
+      addChatMessage({
+        username: 'Sistema',
+        gender: 'N',
+        message: `¡Bienvenido de vuelta, ${userInfo.username}!`,
+        timestamp: new Date().toISOString(),
+        isOwn: false
+      });
+    }, 1000);
+
+  } catch (error) {
+    console.error('Error restoring chat session:', error);
+    localStorage.removeItem('chatUserInfo');
   }
 }
