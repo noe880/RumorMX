@@ -1,33 +1,41 @@
-require("dotenv").config();
 const redis = require("redis");
 
 // Utilidad: obtener URLs de Redis desde env (REDIS_URLS separado por comas o REDIS_URL único)
 function getRedisUrls() {
   const urlsEnv = process.env.REDIS_URLS || process.env.REDIS_URL || "";
-  return urlsEnv
+  console.log("[Cache] REDIS_URL env:", process.env.REDIS_URL ? "SET" : "NOT SET");
+  console.log("[Cache] REDIS_URLS env:", process.env.REDIS_URLS ? "SET" : "NOT SET");
+  const urls = urlsEnv
     .split(/[ ,]+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+  console.log(`[Cache] Redis URLs found: ${urls.length}`);
+  return urls;
 }
 
 // Crear múltiples clientes Redis (uno por URL)
 function createRedisClients() {
   const urls = getRedisUrls();
-  // Si no hay URLs, devolvemos arreglo vacío y se usará fallback in-memory
-  const clients = urls
-    .filter((url) => url && url.length > 0) // Validar que la URL no esté vacía
-    .map((url, idx) => {
-      const client = redis.createClient({
-        url,
-        // Configuración de reconexión para redis v4
-        socket: {
-          reconnectStrategy: (retries) => {
-            if (retries > 10)
-              return new Error("Redis max retry attempts reached");
-            return Math.min(retries * 100, 3000);
-          },
+  
+  if (urls.length === 0) {
+    console.log("[Cache] No Redis URLs available, using in-memory cache");
+    return [];
+  }
+  
+  // Si hay URLs, crear clientes
+  const clients = urls.map((url, idx) => {
+    console.log(`[Cache] Creating Redis client ${idx} with URL: ${url.split('@')[1] || 'UNKNOWN'}`);
+    const client = redis.createClient({
+      url,
+      // Configuración de reconexión para redis v4
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 10)
+            return new Error("Redis max retry attempts reached");
+          return Math.min(retries * 100, 3000);
         },
-      });
+      },
+    });
 
     // Eventos de conexión
     client.on("error", (err) =>
