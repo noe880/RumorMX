@@ -4,27 +4,49 @@ const redis = require("redis");
 
 // Redis client setup
 let redisClient;
+let isRedisConnected = false;
+
 try {
-  redisClient = redis.createClient({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-  });
+  const redisUrl = process.env.REDIS_URL;
+  
+  if (!redisUrl) {
+    console.warn('[Chat] REDIS_URL not set, chat functionality will use fallback');
+    redisClient = null;
+  } else {
+    redisClient = redis.createClient({
+      url: redisUrl,
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 10) return new Error("Redis max retry attempts reached");
+          return Math.min(retries * 100, 3000);
+        },
+      },
+    });
 
-  redisClient.on('error', (err) => {
-    console.error('Redis Client Error:', err);
-  });
+    redisClient.on('error', (err) => {
+      console.error('[Chat] Redis Client Error:', err);
+      isRedisConnected = false;
+    });
 
-  // Connect to Redis
-  (async () => {
-    try {
-      await redisClient.connect();
-      console.log('Connected to Redis for chat functionality');
-    } catch (error) {
-      console.error('Failed to connect to Redis:', error);
-    }
-  })();
+    redisClient.on('connect', () => {
+      console.log('[Chat] Connected to Redis');
+      isRedisConnected = true;
+    });
+
+    (async () => {
+      try {
+        await redisClient.connect();
+        isRedisConnected = true;
+        console.log('[Chat] Redis client connected');
+      } catch (error) {
+        console.error('[Chat] Failed to connect to Redis:', error);
+        isRedisConnected = false;
+      }
+    })();
+  }
 } catch (error) {
-  console.error('Failed to create Redis client:', error);
+  console.error('[Chat] Failed to create Redis client:', error);
+  redisClient = null;
 }
 
 // Chat zone management
@@ -36,6 +58,23 @@ const USER_SESSION_PREFIX = 'user_session:';
 const PRIVATE_CHAT_ROOM_PREFIX = 'private_chat_room:';
 const PRIVATE_CHAT_SESSION_PREFIX = 'private_chat_session:';
 const PRIVATE_CHAT_MESSAGE_PREFIX = 'private_chat_messages:';
+
+// Helper to check Redis availability
+function checkRedisAvailable(res) {
+  if (!redisClient || !isRedisConnected) {
+    res.status(503).json({ error: 'Redis service unavailable' });
+    return false;
+  }
+  return true;
+}
+
+// Middleware to ensure Redis is available for all routes
+router.use((req, res, next) => {
+  if (!redisClient || !isRedisConnected) {
+    return res.status(503).json({ error: 'Redis service unavailable' });
+  }
+  next();
+});
 
 // Join chat zone
 router.post('/join', async (req, res) => {
