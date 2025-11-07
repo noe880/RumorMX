@@ -1,7 +1,6 @@
 const mysql = require("mysql2");
 require("dotenv").config();
 
-// Usar un pool de conexiones para evitar "connection is in closed state"
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -11,15 +10,9 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 10000,
-  // Add timeouts for cloud database connections
-  acquireTimeout: 60000, // 60 seconds to acquire connection
-  timeout: 60000, // 60 seconds query timeout
-  connectTimeout: 30000, // 30 seconds connection timeout
+  connectTimeout: 30000, // ✅ Única opción de timeout necesaria
 });
 
-// Probar conexión inicial (opcional)
 pool.getConnection((err, conn) => {
   if (err) {
     console.error("❌ Error conectando a la base de datos:", err);
