@@ -57,6 +57,10 @@ app.use((req, res) => {
   res.status(404).json({ error: "Ruta no encontrada" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor ejecutándose en https://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Servidor ejecutándose en https://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
