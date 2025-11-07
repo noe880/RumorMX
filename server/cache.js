@@ -1,3 +1,4 @@
+require("dotenv").config();
 const redis = require("redis");
 
 // Utilidad: obtener URLs de Redis desde env (REDIS_URLS separado por comas o REDIS_URL único)
@@ -13,18 +14,20 @@ function getRedisUrls() {
 function createRedisClients() {
   const urls = getRedisUrls();
   // Si no hay URLs, devolvemos arreglo vacío y se usará fallback in-memory
-  const clients = urls.map((url, idx) => {
-    const client = redis.createClient({
-      url,
-      // Configuración de reconexión para redis v4
-      socket: {
-        reconnectStrategy: (retries) => {
-          if (retries > 10)
-            return new Error("Redis max retry attempts reached");
-          return Math.min(retries * 100, 3000);
+  const clients = urls
+    .filter((url) => url && url.length > 0) // Validar que la URL no esté vacía
+    .map((url, idx) => {
+      const client = redis.createClient({
+        url,
+        // Configuración de reconexión para redis v4
+        socket: {
+          reconnectStrategy: (retries) => {
+            if (retries > 10)
+              return new Error("Redis max retry attempts reached");
+            return Math.min(retries * 100, 3000);
+          },
         },
-      },
-    });
+      });
 
     // Eventos de conexión
     client.on("error", (err) =>
